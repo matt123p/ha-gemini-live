@@ -1,10 +1,12 @@
 {
   "domain": "gemini_live",
   "name": "Gemini Live",
-  "codeowners": [],
+  "codeowners": ["@matt123p"],
   "config_flow": true,
-  "documentation": "https://github.com/SJang1/ha-gemini-live",
-  "requirements": [],
-  "version": "1.0.0",
-  "iot_class": "cloud_push"
+  "documentation": "https://github.com/matt123p/ha-gemini-live",
+  "integration_type": "service",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/matt123p/ha-gemini-live/issues",
+  "requirements": ["google-genai>=1.0.0"],
+  "version": "1.0.0"
 }
