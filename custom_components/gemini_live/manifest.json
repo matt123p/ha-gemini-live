@@ -4,9 +4,10 @@
   "codeowners": ["@matt123p"],
   "config_flow": true,
   "documentation": "https://github.com/matt123p/ha-gemini-live",
+  "after_dependencies": ["assist_pipeline"],
   "integration_type": "service",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/matt123p/ha-gemini-live/issues",
   "requirements": ["google-genai>=1.0.0"],
-  "version": "1.0.0"
+  "version": "1.0.1"
 }

@@ -2,6 +2,10 @@
 
 All notable changes to Gemini Live for Home Assistant are documented here.
 
+## 1.0.1
+
+- Fixed HACS and Hassfest validation metadata.
+
 ## 1.0.0
 
 - Added Gemini Live speech-to-text, conversation, and cached native-audio
