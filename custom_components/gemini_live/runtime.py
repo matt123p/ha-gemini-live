@@ -196,6 +196,7 @@ class LiveSessionManager:
     def __init__(self) -> None:
         """Initialize the manager."""
         self._connections: dict[str, _LiveConnection] = {}
+        self._completed_conversations: set[str] = set()
         self._conversation_locks: WeakValueDictionary[str, asyncio.Lock] = (
             WeakValueDictionary()
         )
@@ -245,6 +246,15 @@ class LiveSessionManager:
         """Close every open Live connection."""
         for conversation_id, connection in list(self._connections.items()):
             await self._async_close(conversation_id, connection)
+        self._completed_conversations.clear()
+
+    def complete_conversation(self, conversation_id: str) -> None:
+        """Mark one conversation as completed by Gemini."""
+        self._completed_conversations.add(conversation_id)
+
+    def should_continue_conversation(self, conversation_id: str) -> bool:
+        """Return whether Home Assistant should keep listening."""
+        return conversation_id not in self._completed_conversations
 
     def register_chat_session(
         self,
@@ -267,11 +277,12 @@ class LiveSessionManager:
         chat_session.async_on_cleanup(close_live_session)
 
     async def async_close(self, conversation_id: str) -> None:
-        """Close one conversation's Live connection."""
+        """Close one conversation's Live connection and discard its state."""
         async with self._lock_for(conversation_id):
             connection = self._connections.get(conversation_id)
             if connection is not None:
                 await self._async_close(conversation_id, connection)
+            self._completed_conversations.discard(conversation_id)
 
     def _lock_for(self, conversation_id: str) -> asyncio.Lock:
         """Return the serialization lock for a conversation."""

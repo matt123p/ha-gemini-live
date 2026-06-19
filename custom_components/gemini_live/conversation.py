@@ -30,6 +30,9 @@ from .const import (
     SUPPORTED_LANGUAGES,
 )
 from .stt import (
+    END_CONVERSATION_TOOL_NAME,
+    _add_end_conversation_instruction,
+    _add_end_conversation_tool,
     _add_search_tool_instruction,
     _escape_decode,
     _format_tools_for_gemini_live,
@@ -138,11 +141,14 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                 llm_api.tools,
                 encourage_web_search,
             )
+            system_instruction = _add_end_conversation_instruction(system_instruction)
 
-            gemini_tools = _format_tools_for_gemini_live(
-                llm_api.tools,
-                llm_api.custom_serializer,
-                encourage_web_search,
+            gemini_tools = _add_end_conversation_tool(
+                _format_tools_for_gemini_live(
+                    llm_api.tools,
+                    llm_api.custom_serializer,
+                    encourage_web_search,
+                )
             )
             _LOGGER.debug(
                 "Conversation text path loaded %d HA Assist tools",
@@ -154,7 +160,11 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                 "Could not load HA Assist LLM API for text path: %s. Tools will be unavailable.",
                 exc,
             )
-            return None, [], system_instruction
+            return (
+                None,
+                _add_end_conversation_tool([]),
+                _add_end_conversation_instruction(system_instruction),
+            )
 
     async def _async_process_text_live(
         self,
@@ -241,7 +251,15 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                                     tool_args,
                                 )
 
-                                if llm_api is not None:
+                                if tool_name == END_CONVERSATION_TOOL_NAME:
+                                    session_manager.complete_conversation(
+                                        conversation_id
+                                    )
+                                    tool_result = {
+                                        "success": True,
+                                        "conversation_ended": True,
+                                    }
+                                elif llm_api is not None:
                                     try:
                                         tool_result = await llm_api.async_call_tool(
                                             llm.ToolInput(
@@ -418,4 +436,7 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
         return conversation.ConversationResult(
             response=intent_response,
             conversation_id=conversation_id,
+            continue_conversation=(
+                session_manager.should_continue_conversation(conversation_id)
+            ),
         )

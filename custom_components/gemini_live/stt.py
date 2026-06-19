@@ -84,6 +84,34 @@ _SEARCH_TOOL_INSTRUCTION = (
 
 RESPONSE_INACTIVITY_TIMEOUT = 30.0
 
+END_CONVERSATION_TOOL_NAME = "end_conversation"
+
+_END_CONVERSATION_INSTRUCTION = (
+    f"Call {END_CONVERSATION_TOOL_NAME} when the user clearly indicates that they "
+    "are finished, says goodbye, or asks to end the conversation. Do not call it "
+    "merely because you have finished answering the current request. If the user's "
+    "first request in a conversation is only 'stop', 'cancel', 'silence', 'turn it "
+    "off', or a similar short command, treat it first as a request to stop an "
+    "actively ringing alarm or timer. Before ending the conversation, use the "
+    "available Home Assistant tools to check for and stop the ringing alarm or "
+    "timer. Do not call end_conversation instead of attempting that action. After "
+    "the ringing alarm or timer has been stopped, or if none is ringing, call "
+    f"{END_CONVERSATION_TOOL_NAME} so Home Assistant stops listening."
+)
+
+_END_CONVERSATION_TOOL = {
+    "function_declarations": [
+        {
+            "name": END_CONVERSATION_TOOL_NAME,
+            "description": (
+                "End the current voice conversation so Home Assistant stops "
+                "listening for a follow-up turn. Call only when the user indicates "
+                "that the conversation is finished."
+            ),
+        }
+    ]
+}
+
 
 def _is_search_tool_name(name: str) -> bool:
     """Return whether a tool name indicates web-search capability."""
@@ -199,6 +227,18 @@ def _format_tools_for_gemini_live(
         }
         for tool in tools
     ]
+
+
+def _add_end_conversation_tool(
+    tools: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Add the integration-owned conversation completion callback."""
+    return [*tools, _END_CONVERSATION_TOOL]
+
+
+def _add_end_conversation_instruction(system_instruction: str) -> str:
+    """Tell Gemini when to finish the Home Assistant conversation."""
+    return f"{system_instruction}\n\n{_END_CONVERSATION_INSTRUCTION}"
 
 
 def _add_search_tool_instruction(
@@ -382,7 +422,8 @@ class GeminiLiveSTT(SpeechToTextEntity):
                 exc,
             )
 
-        gemini_tools = (
+        system_instruction = _add_end_conversation_instruction(system_instruction)
+        gemini_tools = _add_end_conversation_tool(
             _format_tools_for_gemini_live(
                 ha_tools,
                 llm_api.custom_serializer,
@@ -623,7 +664,15 @@ class GeminiLiveSTT(SpeechToTextEntity):
                                     tool_args,
                                 )
 
-                                if llm_api is not None:
+                                if tool_name == END_CONVERSATION_TOOL_NAME:
+                                    session_manager.complete_conversation(
+                                        conversation_id
+                                    )
+                                    tool_result = {
+                                        "success": True,
+                                        "conversation_ended": True,
+                                    }
+                                elif llm_api is not None:
                                     try:
                                         tool_input = llm.ToolInput(
                                             tool_name=tool_name,
