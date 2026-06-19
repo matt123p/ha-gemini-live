@@ -146,6 +146,44 @@ The final path must contain:
         └── tts.py
 ```
 
+### Reduce ESPHome Assist Satellite Latency
+
+For the lowest response latency on ESPHome Assist satellites, you also need the
+changes from [home-assistant/core#173712](https://github.com/home-assistant/core/pull/173712).
+Without this change, Home Assistant buffers the complete TTS audio stream before
+it starts sending audio to the satellite.
+
+Until the PR is included in your installed Home Assistant Core release, install
+the PR's ESPHome integration as a custom component override:
+
+1. Download the
+   [PR branch as a ZIP file](https://github.com/matt123p/core/archive/refs/heads/esphome-realtime-tts.zip)
+   and extract it.
+2. Copy the complete `homeassistant/components/esphome` directory from the
+   extracted archive to `<config>/custom_components/esphome`. Do not copy only
+   `assist_satellite.py`; the complete integration directory is required.
+3. Restart Home Assistant.
+4. Check the Home Assistant logs and confirm that `esphome` is being loaded from
+   `custom_components`. Home Assistant will warn that the custom integration
+   overrides a built-in integration; this is expected.
+
+The final override path should look like this:
+
+```text
+<config>/
+└── custom_components/
+    └── esphome/
+        ├── __init__.py
+        ├── assist_satellite.py
+        ├── manifest.json
+        └── ...
+```
+
+This is a temporary override of a built-in Home Assistant integration. It may
+need updating after a Home Assistant upgrade. Once the PR is part of your
+installed Core release, remove `<config>/custom_components/esphome` and restart
+Home Assistant to use the built-in integration again.
+
 ## Configure The Integration
 
 1. In Home Assistant, open **Settings > Devices & services**.
