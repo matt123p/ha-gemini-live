@@ -206,6 +206,7 @@ Home Assistant to use the built-in integration again.
 | Detailed logging | Enables verbose logs from this custom integration. These logs can contain transcripts, model details, and tool-call information. |
 | Transcribe Gemini | Streams Gemini's spoken-response transcript into Home Assistant while native audio is still arriving. Disabled by default for the lowest playback latency. |
 | Encourage web search | Encourages Gemini to use an exposed search-like Assist tool for current, recent, time-sensitive, or explicitly requested online information. Disabled by default. |
+| Show text | Exposes a callback function to let Gemini display formatted text/markdown in the Home Assistant chat UI (e.g. lists, instructions, code) instead of the default placeholder. Only active when "Transcribe Gemini" is disabled. Enabled by default. |
 
 To change the options later, open **Settings > Devices & services**, select
 **Gemini Live**, and select **Configure** or **Reconfigure**.
@@ -283,6 +284,12 @@ search script for current information, enable **Encourage web search** in the
 Gemini Live integration options. This adds search-routing instructions to
 Gemini's system prompt and strengthens the exposed search tool description. It
 does not install, expose, or configure a search tool by itself.
+
+### Use the "Show text" Option for Screen Displays
+
+When **Transcribe Gemini** is turned off (which is recommended for the fastest voice responses), Gemini's spoken reply is normally hidden in the Home Assistant chat UI and only the placeholder `-- gemini live --` is displayed.
+
+If you are using a device with a screen (like a wall tablet, phone, or browser), you can enable the **Show text** option. When enabled, if Gemini decides to give you a detailed list, instructions, links, or code blocks that are better read than listened to, it will display them in the chat UI as formatted text while still speaking to you. If it only has a simple spoken reply, it will continue to show the default placeholder.
 
 ## Supported Audio And Languages
 

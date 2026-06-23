@@ -9,11 +9,13 @@ CONF_SYSTEM_INSTRUCTION = "system_instruction"
 CONF_DETAILED_LOGGING = "detailed_logging"
 CONF_TRANSCRIBE_GEMINI = "transcribe_gemini"
 CONF_ENCOURAGE_WEB_SEARCH = "encourage_web_search"
+CONF_SHOW_TEXT = "show_text"
 
 DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
 DEFAULT_VOICE = "Puck"
 DEFAULT_TRANSCRIBE_GEMINI = False
 DEFAULT_ENCOURAGE_WEB_SEARCH = False
+DEFAULT_SHOW_TEXT = True
 GEMINI_LIVE_TTS_PLACEHOLDER = "-- gemini live --"
 DEFAULT_SYSTEM_INSTRUCTION = (
     "You are a helpful, concise voice assistant for the user's smart home, powered by Home Assistant. "

@@ -21,10 +21,12 @@ from .const import (
     CONF_MODEL,
     CONF_SYSTEM_INSTRUCTION,
     CONF_TRANSCRIBE_GEMINI,
+    CONF_SHOW_TEXT,
     CONF_VOICE,
     DEFAULT_SYSTEM_INSTRUCTION,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_TRANSCRIBE_GEMINI,
+    DEFAULT_SHOW_TEXT,
     DOMAIN,
     GEMINI_LIVE_TTS_PLACEHOLDER,
     GEMINI_SESSION_MANAGER_KEY,
@@ -40,9 +42,9 @@ from .stt import (
     _format_tools_for_gemini_live,
     _is_connection_closed_ok,
     _validate_tool_results,
-    DISPLAY_MARKDOWN_TOOL_NAME,
-    _add_display_markdown_instruction,
-    _add_display_markdown_tool,
+    SHOW_TEXT_TOOL_NAME,
+    _add_show_text_instruction,
+    _add_show_text_tool,
 )
 from .runtime import AudioStream, new_conversation_id
 from .utils import pcm_to_wav, resample_24k_to_16k
@@ -131,6 +133,9 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
         transcribe_gemini = bool(
             config.get(CONF_TRANSCRIBE_GEMINI, DEFAULT_TRANSCRIBE_GEMINI)
         )
+        show_text = bool(
+            config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT)
+        )
         system_instruction = custom_instruction or DEFAULT_SYSTEM_INSTRUCTION
 
         try:
@@ -150,8 +155,8 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                 encourage_web_search,
             )
             system_instruction = _add_end_conversation_instruction(system_instruction)
-            if not transcribe_gemini:
-                system_instruction = _add_display_markdown_instruction(system_instruction)
+            if not transcribe_gemini and show_text:
+                system_instruction = _add_show_text_instruction(system_instruction)
 
             gemini_tools = _add_end_conversation_tool(
                 _format_tools_for_gemini_live(
@@ -160,8 +165,8 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                     encourage_web_search,
                 )
             )
-            if not transcribe_gemini:
-                gemini_tools = _add_display_markdown_tool(gemini_tools)
+            if not transcribe_gemini and show_text:
+                gemini_tools = _add_show_text_tool(gemini_tools)
 
             _LOGGER.debug(
                 "Conversation text path loaded %d HA Assist tools",
@@ -175,9 +180,9 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
             )
             gemini_tools = _add_end_conversation_tool([])
             system_instruction = _add_end_conversation_instruction(system_instruction)
-            if not transcribe_gemini:
-                system_instruction = _add_display_markdown_instruction(system_instruction)
-                gemini_tools = _add_display_markdown_tool(gemini_tools)
+            if not transcribe_gemini and show_text:
+                system_instruction = _add_show_text_instruction(system_instruction)
+                gemini_tools = _add_show_text_tool(gemini_tools)
             return (
                 None,
                 gemini_tools,
@@ -192,7 +197,7 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
     ) -> str | None:
         """Send typed text to Gemini Live and cache the returned audio for TTS."""
         turn_id = uuid4().hex[:8]
-        display_markdown_text: str | None = None
+        show_text_content: str | None = None
         started_at = time.monotonic()
         config = {**self.entry.data, **self.entry.options}
         api_key = config.get(CONF_API_KEY)
@@ -201,6 +206,9 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
         language = user_input.language or "en"
         transcribe_gemini = bool(
             config.get(CONF_TRANSCRIBE_GEMINI, DEFAULT_TRANSCRIBE_GEMINI)
+        )
+        show_text = bool(
+            config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT)
         )
 
         if not api_key:
@@ -281,8 +289,8 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                                         "success": True,
                                         "conversation_ended": True,
                                     }
-                                elif tool_name == DISPLAY_MARKDOWN_TOOL_NAME:
-                                    display_markdown_text = tool_args.get("text")
+                                elif tool_name == SHOW_TEXT_TOOL_NAME:
+                                    show_text_content = tool_args.get("text")
                                     tool_result = {
                                         "success": True,
                                         "displayed": True,
@@ -362,8 +370,8 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                 )
                 return None
 
-        if not transcribe_gemini and display_markdown_text is not None:
-            assistant_text = display_markdown_text
+        if not transcribe_gemini and show_text and show_text_content is not None:
+            assistant_text = show_text_content
         else:
             assistant_text = "".join(text_response_parts)
 

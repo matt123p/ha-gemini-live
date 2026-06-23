@@ -11,10 +11,12 @@ from .const import (
     CONF_DETAILED_LOGGING,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
+    CONF_SHOW_TEXT,
     CONF_TRANSCRIBE_GEMINI,
     CONF_VOICE,
     DEFAULT_TRANSCRIBE_GEMINI,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
+    DEFAULT_SHOW_TEXT,
     CONF_SYSTEM_INSTRUCTION,
     DEFAULT_MODEL,
     DEFAULT_VOICE,
@@ -68,6 +70,10 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_ENCOURAGE_WEB_SEARCH,
                         default=DEFAULT_ENCOURAGE_WEB_SEARCH,
                     ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_SHOW_TEXT,
+                        default=DEFAULT_SHOW_TEXT,
+                    ): selector.BooleanSelector(),
                 }
             ),
             errors=errors,
@@ -98,7 +104,10 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         current_encourage_web_search = config.get(
             CONF_ENCOURAGE_WEB_SEARCH, DEFAULT_ENCOURAGE_WEB_SEARCH
         )
-
+        current_show_text = config.get(
+            CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT
+        )
+ 
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=vol.Schema(
@@ -118,6 +127,10 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Optional(
                         CONF_ENCOURAGE_WEB_SEARCH,
                         default=current_encourage_web_search,
+                    ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_SHOW_TEXT,
+                        default=current_show_text,
                     ): selector.BooleanSelector(),
                 }
             ),
@@ -155,7 +168,10 @@ class GeminiLiveOptionsFlowHandler(config_entries.OptionsFlow):
         current_encourage_web_search = config.get(
             CONF_ENCOURAGE_WEB_SEARCH, DEFAULT_ENCOURAGE_WEB_SEARCH
         )
-
+        current_show_text = config.get(
+            CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT
+        )
+ 
         schema_dict = {
             vol.Required(CONF_API_KEY, default=current_api_key): str,
             vol.Required(CONF_MODEL, default=current_model): vol.In(AVAILABLE_MODELS),
@@ -172,6 +188,10 @@ class GeminiLiveOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(
                 CONF_ENCOURAGE_WEB_SEARCH,
                 default=current_encourage_web_search,
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_SHOW_TEXT,
+                default=current_show_text,
             ): selector.BooleanSelector(),
         }
 

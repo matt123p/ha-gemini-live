@@ -34,11 +34,13 @@ from .const import (
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
     CONF_SYSTEM_INSTRUCTION,
+    CONF_SHOW_TEXT,
     CONF_TRANSCRIBE_GEMINI,
     CONF_VOICE,
     DEFAULT_TRANSCRIBE_GEMINI,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_SYSTEM_INSTRUCTION,
+    DEFAULT_SHOW_TEXT,
     DOMAIN,
     GEMINI_LIVE_TTS_PLACEHOLDER,
     GEMINI_SESSION_MANAGER_KEY,
@@ -112,22 +114,22 @@ _END_CONVERSATION_TOOL = {
     ]
 }
 
-DISPLAY_MARKDOWN_TOOL_NAME = "display_markdown"
+SHOW_TEXT_TOOL_NAME = "show_text"
 
-_DISPLAY_MARKDOWN_INSTRUCTION = (
+_SHOW_TEXT_INSTRUCTION = (
     "The user WILL NOT see the transcription of what you say. "
     "Instead, if you want to display something to the user to read, for example instructions, "
     "lists, links, code blocks, or details that are better written down for the user than read out, "
-    f"then you must call the {DISPLAY_MARKDOWN_TOOL_NAME} function. This is the only way the user "
+    f"then you must call the {SHOW_TEXT_TOOL_NAME} function. This is the only way the user "
     "will see any text from you."
 )
 
-_DISPLAY_MARKDOWN_TOOL = {
+_SHOW_TEXT_TOOL = {
     "function_declarations": [
         {
-            "name": DISPLAY_MARKDOWN_TOOL_NAME,
+            "name": SHOW_TEXT_TOOL_NAME,
             "description": (
-                "Display markdown text to the user. Call this when you want to show written details, "
+                "Display text or markdown to the user. Call this when you want to show written details, "
                 "instructions, or formatted text that the user should read."
             ),
             "parameters": {
@@ -135,7 +137,7 @@ _DISPLAY_MARKDOWN_TOOL = {
                 "properties": {
                     "text": {
                         "type": "STRING",
-                        "description": "The markdown formatted text to display to the user.",
+                        "description": "The text or markdown formatted text to display to the user.",
                     }
                 },
                 "required": ["text"],
@@ -274,16 +276,16 @@ def _add_end_conversation_instruction(system_instruction: str) -> str:
     return f"{system_instruction}\n\n{_END_CONVERSATION_INSTRUCTION}"
 
 
-def _add_display_markdown_tool(
+def _add_show_text_tool(
     tools: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Add the integration-owned display markdown callback."""
-    return [*tools, _DISPLAY_MARKDOWN_TOOL]
+    """Add the integration-owned show text callback."""
+    return [*tools, _SHOW_TEXT_TOOL]
 
 
-def _add_display_markdown_instruction(system_instruction: str) -> str:
-    """Tell Gemini to use the display_markdown callback to show text to the user."""
-    return f"{system_instruction}\n\n{_DISPLAY_MARKDOWN_INSTRUCTION}"
+def _add_show_text_instruction(system_instruction: str) -> str:
+    """Tell Gemini to use the show_text callback to show text to the user."""
+    return f"{system_instruction}\n\n{_SHOW_TEXT_INSTRUCTION}"
 
 
 
@@ -403,11 +405,12 @@ class GeminiLiveSTT(SpeechToTextEntity):
         custom_instruction: str,
         transcribe_gemini: bool,
         encourage_web_search: bool,
+        show_text: bool,
         result_future: asyncio.Future[SpeechResult],
     ) -> SpeechResult:
         """Process audio using the google-genai Live SDK."""
         turn_id = uuid4().hex[:8]
-        display_markdown_text: str | None = None
+        show_text_content: str | None = None
         started_at = time.monotonic()
         conversation_id = active_pipeline_conversation_id(self.hass, self.entity_id)
         entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
@@ -470,8 +473,8 @@ class GeminiLiveSTT(SpeechToTextEntity):
             )
 
         system_instruction = _add_end_conversation_instruction(system_instruction)
-        if not transcribe_gemini:
-            system_instruction = _add_display_markdown_instruction(system_instruction)
+        if not transcribe_gemini and show_text:
+            system_instruction = _add_show_text_instruction(system_instruction)
 
         gemini_tools = _add_end_conversation_tool(
             _format_tools_for_gemini_live(
@@ -482,8 +485,8 @@ class GeminiLiveSTT(SpeechToTextEntity):
             if llm_api
             else []
         )
-        if not transcribe_gemini:
-            gemini_tools = _add_display_markdown_tool(gemini_tools)
+        if not transcribe_gemini and show_text:
+            gemini_tools = _add_show_text_tool(gemini_tools)
         function_declarations = [
             declaration
             for tool in gemini_tools
@@ -670,7 +673,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
 
             async def receive_responses() -> None:
                 nonlocal audio_response_bytes, audio_response_chunk_count
-                nonlocal last_response_activity, display_markdown_text
+                nonlocal last_response_activity, show_text_content
                 try:
                     _LOGGER.warning("[turn=%s] receive_responses started", turn_id)
                     async for response in session.receive():
@@ -724,8 +727,8 @@ class GeminiLiveSTT(SpeechToTextEntity):
                                         "success": True,
                                         "conversation_ended": True,
                                     }
-                                elif tool_name == DISPLAY_MARKDOWN_TOOL_NAME:
-                                    display_markdown_text = tool_args.get("text")
+                                elif tool_name == SHOW_TEXT_TOOL_NAME:
+                                    show_text_content = tool_args.get("text")
                                     tool_result = {
                                         "success": True,
                                         "displayed": True,
@@ -906,8 +909,8 @@ class GeminiLiveSTT(SpeechToTextEntity):
                 )
                 # HA persistently caches TTS audio by message. A per-turn message
                 # prevents it from replaying an earlier Gemini audio stream.
-                if not transcribe_gemini and display_markdown_text is not None:
-                    tts_message = display_markdown_text
+                if not transcribe_gemini and show_text and show_text_content is not None:
+                    tts_message = show_text_content
                 else:
                     tts_message = f"{GEMINI_LIVE_TTS_PLACEHOLDER} {turn_id}"
                 turn_store.add_voice_turn(
@@ -1050,8 +1053,8 @@ class GeminiLiveSTT(SpeechToTextEntity):
             )
             return SpeechResult(None, SpeechResultState.ERROR)
 
-        if not transcribe_gemini and display_markdown_text is not None:
-            assistant_text = display_markdown_text
+        if not transcribe_gemini and show_text and show_text_content is not None:
+            assistant_text = show_text_content
         else:
             assistant_text = response_text
 
@@ -1084,6 +1087,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
         custom_instruction: str,
         transcribe_gemini: bool,
         encourage_web_search: bool,
+        show_text: bool,
     ) -> SpeechResult:
         """Run the Live turn in the background so TTS can consume it immediately."""
         result_future: asyncio.Future[SpeechResult] = asyncio.Future()
@@ -1097,6 +1101,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                 custom_instruction,
                 transcribe_gemini,
                 encourage_web_search,
+                show_text,
                 result_future,
             ),
             "Gemini Live audio turn",
@@ -1163,6 +1168,9 @@ class GeminiLiveSTT(SpeechToTextEntity):
         encourage_web_search = bool(
             config.get(CONF_ENCOURAGE_WEB_SEARCH, DEFAULT_ENCOURAGE_WEB_SEARCH)
         )
+        show_text = bool(
+            config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT)
+        )
         set_detailed_logging(bool(config.get(CONF_DETAILED_LOGGING, False)))
 
         _LOGGER.warning(
@@ -1187,4 +1195,5 @@ class GeminiLiveSTT(SpeechToTextEntity):
             custom_instruction,
             transcribe_gemini,
             encourage_web_search,
+            show_text,
         )
