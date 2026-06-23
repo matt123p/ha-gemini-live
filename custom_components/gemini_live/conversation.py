@@ -20,9 +20,11 @@ from .const import (
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
     CONF_SYSTEM_INSTRUCTION,
+    CONF_TRANSCRIBE_GEMINI,
     CONF_VOICE,
     DEFAULT_SYSTEM_INSTRUCTION,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
+    DEFAULT_TRANSCRIBE_GEMINI,
     DOMAIN,
     GEMINI_LIVE_TTS_PLACEHOLDER,
     GEMINI_SESSION_MANAGER_KEY,
@@ -38,6 +40,9 @@ from .stt import (
     _format_tools_for_gemini_live,
     _is_connection_closed_ok,
     _validate_tool_results,
+    DISPLAY_MARKDOWN_TOOL_NAME,
+    _add_display_markdown_instruction,
+    _add_display_markdown_tool,
 )
 from .runtime import AudioStream, new_conversation_id
 from .utils import pcm_to_wav, resample_24k_to_16k
@@ -123,6 +128,9 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
         encourage_web_search = bool(
             config.get(CONF_ENCOURAGE_WEB_SEARCH, DEFAULT_ENCOURAGE_WEB_SEARCH)
         )
+        transcribe_gemini = bool(
+            config.get(CONF_TRANSCRIBE_GEMINI, DEFAULT_TRANSCRIBE_GEMINI)
+        )
         system_instruction = custom_instruction or DEFAULT_SYSTEM_INSTRUCTION
 
         try:
@@ -142,6 +150,8 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                 encourage_web_search,
             )
             system_instruction = _add_end_conversation_instruction(system_instruction)
+            if not transcribe_gemini:
+                system_instruction = _add_display_markdown_instruction(system_instruction)
 
             gemini_tools = _add_end_conversation_tool(
                 _format_tools_for_gemini_live(
@@ -150,6 +160,9 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                     encourage_web_search,
                 )
             )
+            if not transcribe_gemini:
+                gemini_tools = _add_display_markdown_tool(gemini_tools)
+
             _LOGGER.debug(
                 "Conversation text path loaded %d HA Assist tools",
                 len(gemini_tools),
@@ -160,10 +173,15 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                 "Could not load HA Assist LLM API for text path: %s. Tools will be unavailable.",
                 exc,
             )
+            gemini_tools = _add_end_conversation_tool([])
+            system_instruction = _add_end_conversation_instruction(system_instruction)
+            if not transcribe_gemini:
+                system_instruction = _add_display_markdown_instruction(system_instruction)
+                gemini_tools = _add_display_markdown_tool(gemini_tools)
             return (
                 None,
-                _add_end_conversation_tool([]),
-                _add_end_conversation_instruction(system_instruction),
+                gemini_tools,
+                system_instruction,
             )
 
     async def _async_process_text_live(
@@ -174,12 +192,16 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
     ) -> str | None:
         """Send typed text to Gemini Live and cache the returned audio for TTS."""
         turn_id = uuid4().hex[:8]
+        display_markdown_text: str | None = None
         started_at = time.monotonic()
         config = {**self.entry.data, **self.entry.options}
         api_key = config.get(CONF_API_KEY)
         model = config.get(CONF_MODEL)
         voice = config.get(CONF_VOICE)
         language = user_input.language or "en"
+        transcribe_gemini = bool(
+            config.get(CONF_TRANSCRIBE_GEMINI, DEFAULT_TRANSCRIBE_GEMINI)
+        )
 
         if not api_key:
             _LOGGER.error("API Key not configured for Gemini Live")
@@ -259,6 +281,12 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                                         "success": True,
                                         "conversation_ended": True,
                                     }
+                                elif tool_name == DISPLAY_MARKDOWN_TOOL_NAME:
+                                    display_markdown_text = tool_args.get("text")
+                                    tool_result = {
+                                        "success": True,
+                                        "displayed": True,
+                                    }
                                 elif llm_api is not None:
                                     try:
                                         tool_result = await llm_api.async_call_tool(
@@ -334,7 +362,11 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                 )
                 return None
 
-        assistant_text = "".join(text_response_parts)
+        if not transcribe_gemini and display_markdown_text is not None:
+            assistant_text = display_markdown_text
+        else:
+            assistant_text = "".join(text_response_parts)
+
         if not assistant_text:
             _LOGGER.error("[turn=%s] Gemini text path returned no usable text", turn_id)
             return None
