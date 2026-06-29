@@ -252,6 +252,10 @@ class LiveSessionManager:
         """Mark one conversation as completed by Gemini."""
         self._completed_conversations.add(conversation_id)
 
+    def reset_conversation(self, conversation_id: str) -> None:
+        """Reset completed conversation status for a new user input."""
+        self._completed_conversations.discard(conversation_id)
+
     def should_continue_conversation(self, conversation_id: str) -> bool:
         """Return whether Home Assistant should keep listening."""
         return conversation_id not in self._completed_conversations

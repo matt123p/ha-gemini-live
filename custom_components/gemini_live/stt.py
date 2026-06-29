@@ -415,6 +415,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
         conversation_id = active_pipeline_conversation_id(self.hass, self.entity_id)
         entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
         session_manager = entry_data[GEMINI_SESSION_MANAGER_KEY]
+        session_manager.reset_conversation(conversation_id)
         turn_store = entry_data[GEMINI_TURN_STORE_KEY]
         active_chat_session = chat_session.current_session.get()
         if (

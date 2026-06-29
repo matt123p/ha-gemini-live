@@ -455,6 +455,7 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                     )
                 )
         else:
+            session_manager.reset_conversation(conversation_id)
             user_transcript = input_text
             assistant_text = await self._async_process_text_live(
                 input_text,
