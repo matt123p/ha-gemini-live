@@ -162,8 +162,29 @@ the PR's ESPHome integration as a custom component override:
 2. Copy the complete `homeassistant/components/esphome` directory from the
    extracted archive to `<config>/custom_components/esphome`. Do not copy only
    `assist_satellite.py`; the complete integration directory is required.
-3. Restart Home Assistant.
-4. Check the Home Assistant logs and confirm that `esphome` is being loaded from
+3. Edit `<config>/custom_components/esphome/manifest.json` and add a version
+   key:
+
+   ```json
+   {
+     "domain": "esphome",
+     "version": "0.0.1",
+     "name": "ESPHome",
+     ...
+   }
+   ```
+
+   Without this version key, Home Assistant Core v2026.6.4 and later will
+   block the custom integration from loading with the error:
+
+   ```
+   The custom integration 'esphome' does not have a version key in the
+   manifest file and was blocked from loading. See
+   https://developers.home-assistant.io/blog/2021/01/29/custom-integration-changes#versions
+   for more details
+   ```
+4. Restart Home Assistant.
+5. Check the Home Assistant logs and confirm that `esphome` is being loaded from
    `custom_components`. Home Assistant will warn that the custom integration
    overrides a built-in integration; this is expected.
 
