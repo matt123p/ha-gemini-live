@@ -14,7 +14,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, GEMINI_TURN_STORE_KEY, SUPPORTED_LANGUAGES
+from .const import (
+    DOMAIN,
+    GEMINI_TURN_STORE_KEY,
+    NATIVE_AUDIO_SAMPLE_RATE,
+    SUPPORTED_LANGUAGES,
+)
 from .runtime import AudioStream
 from .utils import pcm_to_wav, streaming_wav_header
 
@@ -117,7 +122,7 @@ class GeminiLiveTTS(TextToSpeechEntity):
 
                 drain_task = asyncio.create_task(drain_message_stream())
                 try:
-                    yield streaming_wav_header()
+                    yield streaming_wav_header(NATIVE_AUDIO_SAMPLE_RATE)
                     async for chunk in audio.async_chunks():
                         yield chunk
                 finally:
@@ -129,14 +134,14 @@ class GeminiLiveTTS(TextToSpeechEntity):
             yield self._get_dummy_wav()
 
         _LOGGER.warning(
-            "TTS: async_stream_tts_audio called | message=%r | streaming=%s",
+            "TTS: async_stream_tts_audio called | message=%r | streaming=%s | sample_rate=%d channels=1 bits=16",
             message[:80] if message else "(none)",
             isinstance(audio, AudioStream),
+            NATIVE_AUDIO_SAMPLE_RATE,
         )
         return TTSAudioResponse("wav", data_gen())
 
     def _get_dummy_wav(self) -> bytes:
-        """Return 1 second of silence as 16kHz mono 16-bit PCM WAV."""
-        # 16000 samples/sec * 2 bytes/sample * 1 sec = 32000 bytes of zero
-        pcm_data = b"\x00" * 32000
-        return pcm_to_wav(pcm_data, 16000)
+        """Return 1 second of silence as native-rate mono 16-bit PCM WAV."""
+        pcm_data = b"\x00" * (NATIVE_AUDIO_SAMPLE_RATE * 2)
+        return pcm_to_wav(pcm_data, NATIVE_AUDIO_SAMPLE_RATE)
