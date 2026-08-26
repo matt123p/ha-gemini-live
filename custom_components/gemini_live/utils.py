@@ -9,7 +9,7 @@ def set_detailed_logging(enabled: bool) -> None:
     level = logging.DEBUG if enabled else logging.ERROR
     logging.getLogger("custom_components.gemini_live").setLevel(level)
 
-def pcm_to_wav(pcm_data: bytes, sample_rate: int = 16000) -> bytes:
+def pcm_to_wav(pcm_data: bytes, sample_rate: int = 24000) -> bytes:
     """Wrap raw 16-bit signed PCM mono audio in a WAV container."""
     num_channels = 1
     sample_width = 2  # 16-bit
@@ -33,7 +33,7 @@ def pcm_to_wav(pcm_data: bytes, sample_rate: int = 16000) -> bytes:
     return header + pcm_data
 
 
-def streaming_wav_header(sample_rate: int = 16000) -> bytes:
+def streaming_wav_header(sample_rate: int = 24000) -> bytes:
     """Return a WAV header whose data length is terminated by end-of-stream."""
     num_channels = 1
     sample_width = 2
@@ -53,22 +53,3 @@ def streaming_wav_header(sample_rate: int = 16000) -> bytes:
         b"data",
         0xFFFFFFFF,
     )
-
-
-def resample_24k_to_16k(data: bytes) -> bytes:
-    """Resample raw 16-bit signed PCM mono audio from 24kHz down to 16kHz using linear interpolation."""
-    num_samples = len(data) // 2
-    if num_samples == 0:
-        return b""
-
-    samples = struct.unpack(f"<{num_samples}h", data)
-    output = []
-    i = 0
-    while i < num_samples - 2:
-        output.append(samples[i])
-        output.append((samples[i+1] + samples[i+2]) // 2)
-        i += 3
-    if i < num_samples:
-        output.append(samples[i])
-
-    return struct.pack(f"<{len(output)}h", *output)

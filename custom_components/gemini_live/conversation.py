@@ -47,7 +47,8 @@ from .stt import (
     _add_show_text_tool,
 )
 from .runtime import AudioStream, new_conversation_id
-from .utils import pcm_to_wav, resample_24k_to_16k
+from .const import NATIVE_AUDIO_SAMPLE_RATE
+from .utils import pcm_to_wav
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -241,7 +242,7 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
 
         text_response_parts: list[str] = []
         audio_response_chunks: list[bytes] = []
-        resampled_pcm_chunks: list[bytes] = []
+        native_pcm_chunks: list[bytes] = []
         wav_data = b""
         native_audio_model = "native-audio" in (model or "")
 
@@ -334,12 +335,10 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                                 if part.inline_data and part.inline_data.data:
                                     raw_chunk = part.inline_data.data
                                     audio_response_chunks.append(raw_chunk)
-                                    resampled_pcm_chunks.append(
-                                        resample_24k_to_16k(raw_chunk)
-                                    )
+                                    native_pcm_chunks.append(raw_chunk)
                                     wav_data = pcm_to_wav(
-                                        b"".join(resampled_pcm_chunks),
-                                        16000,
+                                        b"".join(native_pcm_chunks),
+                                        NATIVE_AUDIO_SAMPLE_RATE,
                                     )
 
                         if content.output_transcription and content.output_transcription.text:
@@ -382,11 +381,12 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
         turn_store.add_audio(assistant_text, wav_data)
 
         _LOGGER.warning(
-            "[turn=%s] conversation text path complete text_chars=%d audio_chunks=%d wav_bytes=%d elapsed=%.3fs",
+            "[turn=%s] conversation text path complete text_chars=%d audio_chunks=%d wav_bytes=%d sample_rate=%d elapsed=%.3fs",
             turn_id,
             len(assistant_text),
             len(audio_response_chunks),
             len(wav_data),
+            NATIVE_AUDIO_SAMPLE_RATE,
             time.monotonic() - started_at,
         )
         return assistant_text

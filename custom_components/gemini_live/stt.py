@@ -53,7 +53,8 @@ from .runtime import (
     TextStream,
     active_pipeline_conversation_id,
 )
-from .utils import resample_24k_to_16k, set_detailed_logging
+from .const import NATIVE_AUDIO_SAMPLE_RATE
+from .utils import set_detailed_logging
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -815,8 +816,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                                     raw_chunk = part.inline_data.data
                                     audio_response_chunk_count += 1
                                     audio_response_bytes += len(raw_chunk)
-                                    resampled_chunk = resample_24k_to_16k(raw_chunk)
-                                    response_audio_stream.add_chunk(resampled_chunk)
+                                    response_audio_stream.add_chunk(raw_chunk)
                                     first_audio.set()
                                     _LOGGER.debug(
                                         "[turn=%s] inline audio chunk bytes=%d total_audio_chunks=%d",
@@ -1035,9 +1035,10 @@ class GeminiLiveSTT(SpeechToTextEntity):
 
         if first_audio.is_set():
             _LOGGER.warning(
-                "STT: Gemini audio ready: text=%d chars, raw_audio=%d bytes",
+                "STT: Gemini audio ready: text=%d chars, raw_audio=%d bytes sample_rate=%d channels=1 bits=16",
                 len(response_text),
                 all_audio_24k_len,
+                NATIVE_AUDIO_SAMPLE_RATE,
             )
         else:
             _LOGGER.warning("STT: No audio response received from Gemini Live")

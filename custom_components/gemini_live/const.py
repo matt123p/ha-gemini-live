@@ -1,6 +1,7 @@
 """Constants for the Gemini Live integration."""
 
 DOMAIN = "gemini_live"
+NATIVE_AUDIO_SAMPLE_RATE = 24000
 
 CONF_API_KEY = "api_key"
 CONF_MODEL = "model"

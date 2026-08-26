@@ -266,13 +266,18 @@ If you are using a device with a screen (like a wall tablet, phone, or browser),
 ## Supported Audio And Languages
 
 The STT entity accepts WAV audio containing 16-bit, 16 kHz, mono PCM. This is
-the format used by a compatible Home Assistant Assist pipeline. Gemini's 24 kHz
-native response audio is converted to 16 kHz PCM and streamed through the TTS
-stage as it arrives. When **Transcribe Gemini** is enabled, Home Assistant also
+the format used by a compatible Home Assistant Assist pipeline. Gemini's native
+24 kHz, 16-bit, mono response audio is streamed through the TTS stage without
+downsampling. When **Transcribe Gemini** is enabled, Home Assistant also
 streams transcript text into TTS and starts playback after its built-in
 streaming threshold is reached. Short transcribed replies may therefore wait
 until their transcript is complete. Disabling the option starts playback from
 the first available audio with only the configured user-transcript wait.
+
+Home Assistant may still transcode the TTS result when a target explicitly
+requests another format or sample rate. In particular, voice targets that
+require 16 kHz WAV remain compatible and will be converted by Home Assistant;
+the native 24 kHz path is used when the target does not request that conversion.
 
 The integration advertises all 78 languages currently listed as supported by
 Gemini's native audio models:
