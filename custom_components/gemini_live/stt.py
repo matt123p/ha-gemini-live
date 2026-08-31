@@ -1177,7 +1177,10 @@ class GeminiLiveSTT(SpeechToTextEntity):
                         learn_more_url=_SPENDING_CAP_URL,
                         severity=IssueSeverity.ERROR,
                         translation_key="spending_cap_exceeded",
-                        translation_placeholders={"entry_title": self.entry.title},
+                        translation_placeholders={
+                            "entry_title": self.entry.title,
+                            "spending_cap_url": _SPENDING_CAP_URL,
+                        },
                     )
                     turn_store = self.hass.data[DOMAIN][self.entry.entry_id][
                         GEMINI_TURN_STORE_KEY
