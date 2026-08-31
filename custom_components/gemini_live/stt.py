@@ -56,7 +56,7 @@ from .runtime import (
     AudioStream,
     PipelineTurn,
     TextStream,
-    active_pipeline_conversation_id,
+    active_pipeline_context,
 )
 from .utils import resample_24k_to_16k, set_detailed_logging
 
@@ -439,6 +439,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
         show_text: bool,
         result_future: asyncio.Future[SpeechResult],
         conversation_id: str,
+        device_id: str | None,
     ) -> SpeechResult:
         """Process audio using the google-genai Live SDK."""
         turn_id = uuid4().hex[:8]
@@ -461,12 +462,13 @@ class GeminiLiveSTT(SpeechToTextEntity):
             session_manager.register_chat_session(self.hass, active_chat_session)
 
         _LOGGER.warning(
-            "[turn=%s] SDK helper start api_key_present=%s model=%s voice=%s language=%s",
+            "[turn=%s] SDK helper start api_key_present=%s model=%s voice=%s language=%s device_id=%s",
             turn_id,
             bool(api_key),
             model,
             voice,
             metadata.language or "en",
+            device_id,
         )
 
         llm_api: llm.APIInstance | None = None
@@ -482,7 +484,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                     context=Context(),
                     language=metadata.language or "en",
                     assistant="conversation",
-                    device_id=None,
+                    device_id=device_id,
                 ),
             )
             ha_tools = llm_api.tools
@@ -1138,7 +1140,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
     ) -> SpeechResult:
         """Run the Live turn in the background so TTS can consume it immediately."""
         result_future: asyncio.Future[SpeechResult] = asyncio.Future()
-        conversation_id = active_pipeline_conversation_id(self.hass, self.entity_id)
+        conversation_id, device_id = active_pipeline_context(self.hass, self.entity_id)
         task = self.hass.async_create_background_task(
             self._async_run_audio_stream_sdk(
                 metadata,
@@ -1152,6 +1154,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                 show_text,
                 result_future,
                 conversation_id,
+                device_id,
             ),
             "Gemini Live audio turn",
         )

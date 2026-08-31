@@ -4,6 +4,9 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## 1.0.4
 
+- Added the satellite's device ID to the LLM context for voice turns so Home
+  Assistant tells Gemini which area the microphone is in, and lets generic
+  commands like "turn on the lights" target that area automatically.
 - Added a user-visible response when the configured Google AI project exceeds
   its monthly spending cap, instead of failing the Assist pipeline silently.
 - Added a persistent Home Assistant Repairs issue with a link to Google AI

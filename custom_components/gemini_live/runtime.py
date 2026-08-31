@@ -339,11 +339,16 @@ def new_conversation_id() -> str:
     return uuid4().hex
 
 
-def active_pipeline_conversation_id(hass: HomeAssistant, stt_entity_id: str) -> str:
-    """Resolve the conversation ID for the active STT pipeline run.
+def active_pipeline_context(
+    hass: HomeAssistant,
+    stt_entity_id: str,
+) -> tuple[str, str | None]:
+    """Resolve the conversation ID and device ID for the active STT pipeline run.
 
-    Home Assistant keeps this ID on PipelineRun but does not currently pass it
-    through SpeechMetadata. The guarded introspection can be removed when the
+    Home Assistant keeps both on PipelineRun but does not currently pass them
+    through SpeechMetadata. The device ID is the same one Home Assistant
+    forwards to the conversation agent, so the LLM API can resolve the
+    satellite's area. The guarded introspection can be removed when the
     public STT API exposes a pipeline or conversation identifier.
     """
     try:
@@ -353,7 +358,7 @@ def active_pipeline_conversation_id(hass: HomeAssistant, stt_entity_id: str) -> 
         )
 
         pipeline_data = hass.data[KEY_ASSIST_PIPELINE]
-        candidates: list[tuple[str, str]] = []
+        candidates: list[tuple[str, str, str | None]] = []
         for runs in pipeline_data.pipeline_runs._pipeline_runs.values():
             for run in runs.values():
                 provider = getattr(run, "stt_provider", None)
@@ -365,6 +370,7 @@ def active_pipeline_conversation_id(hass: HomeAssistant, stt_entity_id: str) -> 
                 if debug is None:
                     continue
                 conversation_id: str | None = None
+                device_id = getattr(run, "_device_id", None)
                 stt_started: str | None = None
                 stt_ended = False
                 for event in debug.events:
@@ -376,9 +382,10 @@ def active_pipeline_conversation_id(hass: HomeAssistant, stt_entity_id: str) -> 
                     elif event.type == PipelineEventType.STT_END:
                         stt_ended = True
                 if conversation_id and stt_started and not stt_ended:
-                    candidates.append((stt_started, conversation_id))
+                    candidates.append((stt_started, conversation_id, device_id))
         if candidates:
-            return max(candidates)[1]
+            _, conversation_id, device_id = max(candidates)
+            return conversation_id, device_id
     except Exception:  # noqa: BLE001
         _LOGGER.debug(
             "Could not resolve active pipeline conversation ID",
@@ -391,4 +398,4 @@ def active_pipeline_conversation_id(hass: HomeAssistant, stt_entity_id: str) -> 
         "using temporary conversation %s",
         conversation_id,
     )
-    return conversation_id
+    return conversation_id, None
