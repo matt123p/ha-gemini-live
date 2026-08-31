@@ -750,9 +750,11 @@ class GeminiLiveSTT(SpeechToTextEntity):
                                 tool_name = call.name or ""
                                 tool_args = _escape_decode(call.args or {})
                                 call_id = call.id
-                                _LOGGER.info(
-                                    "Gemini Live tool call: %s(%s)",
+                                _LOGGER.debug(
+                                    "[turn=%s] LLM tool call name=%s id=%s arguments=%r",
+                                    turn_id,
                                     tool_name,
+                                    call_id,
                                     tool_args,
                                 )
 
@@ -785,6 +787,14 @@ class GeminiLiveSTT(SpeechToTextEntity):
                                 else:
                                     tool_result = {"error": "HA LLM API not available"}
                                 tool_result = _validate_tool_results(tool_result)
+
+                                _LOGGER.debug(
+                                    "[turn=%s] LLM tool response name=%s id=%s response=%r",
+                                    turn_id,
+                                    tool_name,
+                                    call_id,
+                                    tool_result,
+                                )
 
                                 _LOGGER.warning(
                                     "[turn=%s] tool response prepared name=%s id=%s result_type=%s",

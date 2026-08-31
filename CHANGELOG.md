@@ -8,6 +8,8 @@ All notable changes to Gemini Live for Home Assistant are documented here.
   its monthly spending cap, instead of failing the Assist pipeline silently.
 - Added a persistent Home Assistant Repairs issue with a link to Google AI
   Studio. The issue clears automatically after Gemini Live reconnects.
+- Added detailed debug logging for LLM tool calls and their responses in both
+  voice and typed conversation paths.
 - Removed obsolete instructions for patching Home Assistant Core now that the
   low-latency change is included upstream.
 

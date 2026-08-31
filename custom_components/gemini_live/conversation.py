@@ -275,9 +275,11 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                                 tool_name = call.name or ""
                                 tool_args = _escape_decode(call.args or {})
                                 call_id = call.id
-                                _LOGGER.info(
-                                    "Gemini Live text path tool call: %s(%s)",
+                                _LOGGER.debug(
+                                    "[turn=%s] LLM tool call name=%s id=%s arguments=%r",
+                                    turn_id,
                                     tool_name,
+                                    call_id,
                                     tool_args,
                                 )
 
@@ -309,6 +311,14 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                                 else:
                                     tool_result = {"error": "HA LLM API not available"}
                                 tool_result = _validate_tool_results(tool_result)
+
+                                _LOGGER.debug(
+                                    "[turn=%s] LLM tool response name=%s id=%s response=%r",
+                                    turn_id,
+                                    tool_name,
+                                    call_id,
+                                    tool_result,
+                                )
 
                                 function_responses.append(
                                     types.FunctionResponse(
