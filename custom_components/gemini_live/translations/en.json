@@ -69,5 +69,11 @@
         }
       }
     }
+  },
+  "issues": {
+    "spending_cap_exceeded": {
+      "title": "Gemini Live spending cap exceeded",
+      "description": "The Google AI project used by **{entry_title}** has exceeded its monthly spending cap, so Gemini Live cannot answer requests. [Manage the project's spending limit](https://ai.studio/spend), then try Gemini Live again. This issue will clear automatically after Gemini Live connects successfully."
+    }
   }
 }

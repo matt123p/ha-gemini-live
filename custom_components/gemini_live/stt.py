@@ -27,6 +27,11 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import chat_session, llm
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.issue_registry import (
+    IssueSeverity,
+    async_create_issue,
+    async_delete_issue,
+)
 
 from .const import (
     CONF_API_KEY,
@@ -85,6 +90,15 @@ _SEARCH_TOOL_INSTRUCTION = (
 )
 
 RESPONSE_INACTIVITY_TIMEOUT = 30.0
+
+_SPENDING_CAP_ERROR_MARKER = "exceeded its monthly spending cap"
+_SPENDING_CAP_ISSUE_PREFIX = "spending_cap_exceeded"
+_SPENDING_CAP_URL = "https://ai.studio/spend"
+_SPENDING_CAP_USER_MESSAGE = (
+    "Gemini Live is unavailable because your Google AI project has exceeded "
+    f"its monthly spending cap. Please go to {_SPENDING_CAP_URL} to manage "
+    "your project's spending limit."
+)
 
 END_CONVERSATION_TOOL_NAME = "end_conversation"
 
@@ -157,6 +171,23 @@ def _is_search_tool_name(name: str) -> bool:
 def _is_connection_closed_ok(exc: Exception) -> bool:
     """Return true for websockets' normal-close exception without importing it."""
     return exc.__class__.__name__ == "ConnectionClosedOK"
+
+
+def _user_visible_api_error(exc: BaseException) -> str | None:
+    """Return safe user-facing text for API failures the user can resolve."""
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if _SPENDING_CAP_ERROR_MARKER in str(current).lower():
+            return _SPENDING_CAP_USER_MESSAGE
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _spending_cap_issue_id(entry_id: str) -> str:
+    """Return the Repairs issue ID for one config entry."""
+    return f"{_SPENDING_CAP_ISSUE_PREFIX}_{entry_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -407,12 +438,12 @@ class GeminiLiveSTT(SpeechToTextEntity):
         encourage_web_search: bool,
         show_text: bool,
         result_future: asyncio.Future[SpeechResult],
+        conversation_id: str,
     ) -> SpeechResult:
         """Process audio using the google-genai Live SDK."""
         turn_id = uuid4().hex[:8]
         show_text_content: str | None = None
         started_at = time.monotonic()
-        conversation_id = active_pipeline_conversation_id(self.hass, self.entity_id)
         entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
         session_manager = entry_data[GEMINI_SESSION_MANAGER_KEY]
         session_manager.reset_conversation(conversation_id)
@@ -575,6 +606,11 @@ class GeminiLiveSTT(SpeechToTextEntity):
             model,
             live_config,
         ) as session:
+            async_delete_issue(
+                self.hass,
+                DOMAIN,
+                _spending_cap_issue_id(self.entry.entry_id),
+            )
             _LOGGER.warning(
                 "[turn=%s] acquired Gemini Live session conversation=%s",
                 turn_id,
@@ -1092,6 +1128,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
     ) -> SpeechResult:
         """Run the Live turn in the background so TTS can consume it immediately."""
         result_future: asyncio.Future[SpeechResult] = asyncio.Future()
+        conversation_id = active_pipeline_conversation_id(self.hass, self.entity_id)
         task = self.hass.async_create_background_task(
             self._async_run_audio_stream_sdk(
                 metadata,
@@ -1104,6 +1141,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                 encourage_web_search,
                 show_text,
                 result_future,
+                conversation_id,
             ),
             "Gemini Live audio turn",
         )
@@ -1115,9 +1153,39 @@ class GeminiLiveSTT(SpeechToTextEntity):
                 result_future.set_result(completed_task.result())
             except asyncio.CancelledError:
                 result_future.set_result(SpeechResult(None, SpeechResultState.ERROR))
-            except Exception:  # noqa: BLE001
-                _LOGGER.exception("Gemini Live audio turn failed")
-                result_future.set_result(SpeechResult(None, SpeechResultState.ERROR))
+            except Exception as exc:  # noqa: BLE001
+                if user_message := _user_visible_api_error(exc):
+                    async_create_issue(
+                        self.hass,
+                        DOMAIN,
+                        _spending_cap_issue_id(self.entry.entry_id),
+                        is_fixable=False,
+                        is_persistent=True,
+                        learn_more_url=_SPENDING_CAP_URL,
+                        severity=IssueSeverity.ERROR,
+                        translation_key="spending_cap_exceeded",
+                        translation_placeholders={"entry_title": self.entry.title},
+                    )
+                    turn_store = self.hass.data[DOMAIN][self.entry.entry_id][
+                        GEMINI_TURN_STORE_KEY
+                    ]
+                    turn_store.add_voice_turn(
+                        PipelineTurn(
+                            conversation_id=conversation_id,
+                            user_text=user_message,
+                            assistant_text=user_message,
+                            audio=b"",
+                        )
+                    )
+                    _LOGGER.warning("Gemini Live monthly spending cap exceeded")
+                    result_future.set_result(
+                        SpeechResult(user_message, SpeechResultState.SUCCESS)
+                    )
+                else:
+                    _LOGGER.exception("Gemini Live audio turn failed")
+                    result_future.set_result(
+                        SpeechResult(None, SpeechResultState.ERROR)
+                    )
 
         task.add_done_callback(set_final_result)
         try:
