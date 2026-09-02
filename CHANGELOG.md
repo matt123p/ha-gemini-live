@@ -2,6 +2,12 @@
 
 All notable changes to Gemini Live for Home Assistant are documented here.
 
+## 1.0.5
+
+- Fixed Home Assistant script parameters being omitted from Gemini tool
+  declarations on newer Home Assistant releases.
+- Retained schema-conversion compatibility with older Home Assistant releases.
+
 ## 1.0.4
 
 - Added the satellite's device ID to the LLM context for voice turns so Home

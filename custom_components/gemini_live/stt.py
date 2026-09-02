@@ -200,7 +200,7 @@ def _camel_to_snake(name: str) -> str:
 
 
 def _format_schema_for_gemini(schema: dict[str, Any]) -> dict[str, Any]:
-    """Convert a voluptuous-openapi schema dict to Gemini Live-compatible format."""
+    """Convert an OpenAPI schema dict to Gemini Live-compatible format."""
     if subschemas := schema.get("allOf"):
         for subschema in subschemas:
             if "type" in subschema:
@@ -247,13 +247,24 @@ def _format_tool_for_gemini_live(
 ) -> dict[str, Any]:
     """Convert an HA LLM Tool to a Gemini Live functionDeclaration dict."""
     try:
-        from voluptuous_openapi import convert  # type: ignore[import]
-
         if tool.parameters.schema:
-            raw_schema = convert(
-                tool.parameters,
-                custom_serializer=custom_serializer,
-            )
+            try:
+                # Home Assistant 2026.8 and newer use probatio for OpenAPI
+                # schema generation.
+                from probatio import to_openapi  # type: ignore[import]
+
+                raw_schema = to_openapi(
+                    tool.parameters,
+                    custom_serializer=custom_serializer,
+                )
+            except ImportError:
+                # Keep compatibility with older Home Assistant releases.
+                from voluptuous_openapi import convert  # type: ignore[import]
+
+                raw_schema = convert(
+                    tool.parameters,
+                    custom_serializer=custom_serializer,
+                )
             parameters: dict | None = _format_schema_for_gemini(raw_schema)
         else:
             parameters = None
