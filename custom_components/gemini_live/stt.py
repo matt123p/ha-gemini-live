@@ -109,8 +109,6 @@ _PREPAYMENT_CREDITS_USER_MESSAGE = (
     "or manage your project's billing."
 )
 
-_GOOGLE_GENERATIVE_AI_DOMAIN = "google_generative_ai_conversation"
-
 END_CONVERSATION_TOOL_NAME = "end_conversation"
 
 _END_CONVERSATION_INSTRUCTION = (
@@ -1229,8 +1227,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                         DOMAIN,
                         issue_id,
                         is_fixable=False,
-                        is_persistent=True,
-                        issue_domain=_GOOGLE_GENERATIVE_AI_DOMAIN,
+                        is_persistent=False,
                         learn_more_url=issue_url,
                         severity=IssueSeverity.ERROR,
                         translation_key=translation_key,
@@ -1250,8 +1247,12 @@ class GeminiLiveSTT(SpeechToTextEntity):
                         )
                     )
                     _LOGGER.warning(
-                        "Gemini Live billing unavailable: %s",
-                        translation_key,
+                        "Gemini Live is unavailable because %s",
+                        (
+                            "prepayment credits are depleted"
+                            if prepayment_credits_depleted
+                            else "the monthly spending cap was exceeded"
+                        ),
                     )
                     result_future.set_result(
                         SpeechResult(user_message, SpeechResultState.SUCCESS)
