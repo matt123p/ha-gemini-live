@@ -100,6 +100,17 @@ _SPENDING_CAP_USER_MESSAGE = (
     "your project's spending limit."
 )
 
+_PREPAYMENT_CREDITS_ERROR_MARKER = "prepayment credits are depleted"
+_PREPAYMENT_CREDITS_ISSUE_PREFIX = "prepayment_credits_depleted"
+_PREPAYMENT_CREDITS_URL = "https://ai.studio/projects"
+_PREPAYMENT_CREDITS_USER_MESSAGE = (
+    "Gemini Live is unavailable because your Google AI prepayment credits "
+    f"are depleted. Please go to {_PREPAYMENT_CREDITS_URL} to add credits "
+    "or manage your project's billing."
+)
+
+_GOOGLE_GENERATIVE_AI_DOMAIN = "google_generative_ai_conversation"
+
 END_CONVERSATION_TOOL_NAME = "end_conversation"
 
 _END_CONVERSATION_INSTRUCTION = (
@@ -179,8 +190,11 @@ def _user_visible_api_error(exc: BaseException) -> str | None:
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if _SPENDING_CAP_ERROR_MARKER in str(current).lower():
+        error_text = str(current).lower()
+        if _SPENDING_CAP_ERROR_MARKER in error_text:
             return _SPENDING_CAP_USER_MESSAGE
+        if _PREPAYMENT_CREDITS_ERROR_MARKER in error_text:
+            return _PREPAYMENT_CREDITS_USER_MESSAGE
         current = current.__cause__ or current.__context__
     return None
 
@@ -188,6 +202,11 @@ def _user_visible_api_error(exc: BaseException) -> str | None:
 def _spending_cap_issue_id(entry_id: str) -> str:
     """Return the Repairs issue ID for one config entry."""
     return f"{_SPENDING_CAP_ISSUE_PREFIX}_{entry_id}"
+
+
+def _prepayment_credits_issue_id(entry_id: str) -> str:
+    """Return the prepaid credits Repairs issue ID for one config entry."""
+    return f"{_PREPAYMENT_CREDITS_ISSUE_PREFIX}_{entry_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -623,6 +642,11 @@ class GeminiLiveSTT(SpeechToTextEntity):
                 self.hass,
                 DOMAIN,
                 _spending_cap_issue_id(self.entry.entry_id),
+            )
+            async_delete_issue(
+                self.hass,
+                DOMAIN,
+                _prepayment_credits_issue_id(self.entry.entry_id),
             )
             _LOGGER.warning(
                 "[turn=%s] acquired Gemini Live session conversation=%s",
@@ -1182,23 +1206,41 @@ class GeminiLiveSTT(SpeechToTextEntity):
                 result_future.set_result(SpeechResult(None, SpeechResultState.ERROR))
             except Exception as exc:  # noqa: BLE001
                 if user_message := _user_visible_api_error(exc):
+                    prepayment_credits_depleted = (
+                        user_message == _PREPAYMENT_CREDITS_USER_MESSAGE
+                    )
+                    issue_id = (
+                        _prepayment_credits_issue_id(self.entry.entry_id)
+                        if prepayment_credits_depleted
+                        else _spending_cap_issue_id(self.entry.entry_id)
+                    )
+                    issue_url = (
+                        _PREPAYMENT_CREDITS_URL
+                        if prepayment_credits_depleted
+                        else _SPENDING_CAP_URL
+                    )
+                    translation_key = "spending_cap_exceeded"
+                    translation_placeholders = {
+                        "entry_title": self.entry.title,
+                        "spending_cap_url": issue_url,
+                    }
                     async_create_issue(
                         self.hass,
                         DOMAIN,
-                        _spending_cap_issue_id(self.entry.entry_id),
+                        issue_id,
                         is_fixable=False,
                         is_persistent=True,
-                        learn_more_url=_SPENDING_CAP_URL,
+                        issue_domain=_GOOGLE_GENERATIVE_AI_DOMAIN,
+                        learn_more_url=issue_url,
                         severity=IssueSeverity.ERROR,
-                        translation_key="spending_cap_exceeded",
-                        translation_placeholders={
-                            "entry_title": self.entry.title,
-                            "spending_cap_url": _SPENDING_CAP_URL,
-                        },
+                        translation_key=translation_key,
+                        translation_placeholders=translation_placeholders,
                     )
-                    turn_store = self.hass.data[DOMAIN][self.entry.entry_id][
-                        GEMINI_TURN_STORE_KEY
-                    ]
+                    entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
+                    entry_data[GEMINI_SESSION_MANAGER_KEY].complete_conversation(
+                        conversation_id
+                    )
+                    turn_store = entry_data[GEMINI_TURN_STORE_KEY]
                     turn_store.add_voice_turn(
                         PipelineTurn(
                             conversation_id=conversation_id,
@@ -1207,7 +1249,10 @@ class GeminiLiveSTT(SpeechToTextEntity):
                             audio=b"",
                         )
                     )
-                    _LOGGER.warning("Gemini Live monthly spending cap exceeded")
+                    _LOGGER.warning(
+                        "Gemini Live billing unavailable: %s",
+                        translation_key,
+                    )
                     result_future.set_result(
                         SpeechResult(user_message, SpeechResultState.SUCCESS)
                     )

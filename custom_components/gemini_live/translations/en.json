@@ -72,8 +72,8 @@
   },
   "issues": {
     "spending_cap_exceeded": {
-      "title": "Gemini Live spending cap exceeded",
-      "description": "The Google AI project used by **{entry_title}** has exceeded its monthly spending cap, so Gemini Live cannot answer requests. [Manage the project's spending limit]({spending_cap_url}), then try Gemini Live again. This issue will clear automatically after Gemini Live connects successfully."
+      "title": "Gemini Live billing unavailable",
+      "description": "The Google AI project used by **{entry_title}** cannot process Gemini Live requests because its spending cap or available prepaid credit balance has been exhausted. [Manage the project's billing]({spending_cap_url}), then try Gemini Live again. This issue will clear automatically after Gemini Live connects successfully."
     }
   }
 }
