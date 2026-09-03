@@ -518,7 +518,6 @@ class GPTRealtimeConversationAgent(LiveModelConversationAgent):
 
     integration_name = "GPT Realtime"
     conversation_event = "gpt_realtime_conversation_entry"
-    tts_placeholder = "-- gpt realtime --"
     transcribe_config_key = CONF_TRANSCRIBE_GPT
     default_transcribe = DEFAULT_TRANSCRIBE_GPT
     error_response = "Sorry, I could not get a response from GPT Realtime."

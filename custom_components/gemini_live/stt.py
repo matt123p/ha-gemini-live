@@ -653,6 +653,7 @@ class LiveModelSTT(SpeechToTextEntity):
                     raise
                 except Exception as exc:  # noqa: BLE001
                     _LOGGER.exception("[turn=%s] Failure inside send_audio: %s", turn_id, exc)
+                    raise
 
             async def receive_responses() -> None:
                 nonlocal audio_response_bytes, audio_response_chunk_count
@@ -847,6 +848,7 @@ class LiveModelSTT(SpeechToTextEntity):
                             turn_id,
                             exc,
                         )
+                    raise
 
             send_task = asyncio.create_task(send_audio())
             receive_task = asyncio.create_task(receive_responses())
@@ -921,6 +923,7 @@ class LiveModelSTT(SpeechToTextEntity):
                             turn_id,
                             exc,
                         )
+                        raise
 
                 if receive_task in done:
                     if not send_task.done():
@@ -1252,7 +1255,6 @@ class GPTRealtimeSTT(LiveModelSTT):
     """Stream a Home Assistant voice turn through OpenAI Realtime."""
 
     integration_name = "GPT Realtime"
-    tts_placeholder = "-- gpt realtime --"
     transcribe_config_key = CONF_TRANSCRIBE_GPT
     default_transcribe = DEFAULT_TRANSCRIBE_GPT
     default_system_instruction = DEFAULT_SYSTEM_INSTRUCTION

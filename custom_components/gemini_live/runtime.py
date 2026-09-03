@@ -243,6 +243,9 @@ class LiveSessionManager:
             except Exception:
                 await self._async_close(conversation_id, connection)
                 raise
+            finally:
+                if conversation_id in self._completed_conversations:
+                    await self._async_close(conversation_id, connection)
 
     async def async_close_all(self) -> None:
         """Close every open Live connection."""
@@ -251,7 +254,7 @@ class LiveSessionManager:
         self._completed_conversations.clear()
 
     def complete_conversation(self, conversation_id: str) -> None:
-        """Mark one conversation as completed by Gemini."""
+        """Mark a conversation complete and retire its session after the turn."""
         self._completed_conversations.add(conversation_id)
 
     def reset_conversation(self, conversation_id: str) -> None:

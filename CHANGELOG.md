@@ -11,6 +11,10 @@ All notable changes to Gemini Live for Home Assistant are documented here.
   session, STT, and TTS pipeline logic.
 - Kept existing config entries backward compatible by treating entries without
   a provider field as Google Gemini.
+- Close provider sessions immediately after `end_conversation`, and evict sessions
+  when their audio sender or response receiver reports a transport failure.
+- Use the existing `-- gemini live --` pipeline placeholder for both providers so
+  remote satellites can filter one consistent marker.
 
 ## 1.0.5
 
