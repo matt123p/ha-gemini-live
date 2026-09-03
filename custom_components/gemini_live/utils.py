@@ -3,6 +3,11 @@
 import logging
 import struct
 
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - numpy is supplied by Home Assistant
+    np = None
+
 
 def set_detailed_logging(enabled: bool) -> None:
     """Set package logging verbosity for Gemini Live."""
@@ -56,12 +61,43 @@ def streaming_wav_header(sample_rate: int = 16000) -> bytes:
 
 
 def resample_24k_to_16k(data: bytes) -> bytes:
-    """Resample raw 16-bit signed PCM mono audio from 24kHz down to 16kHz using linear interpolation."""
+    """Resample raw 16-bit signed PCM mono audio from 24kHz to 16kHz."""
+    if np is not None:
+        return _resample_24k_to_16k_numpy(data)
+    return _resample_24k_to_16k_pure(data)
+
+
+def _resample_24k_to_16k_numpy(data: bytes) -> bytes:
+    """Resample using NumPy while matching the pure-Python implementation."""
     num_samples = len(data) // 2
     if num_samples == 0:
         return b""
 
-    samples = struct.unpack(f"<{num_samples}h", data)
+    samples = np.frombuffer(data[: num_samples * 2], dtype="<i2")
+    triplets = num_samples // 3
+    if triplets == 0:
+        return data[:2]
+
+    triples = samples[: triplets * 3].reshape(triplets, 3)
+    output = np.empty(triplets * 2, dtype="<i2")
+    output[0::2] = triples[:, 0]
+    output[1::2] = (
+        (triples[:, 1].astype(np.int32) + triples[:, 2]) // 2
+    ).astype(np.int16)
+    if num_samples > triplets * 3:
+        output = np.concatenate(
+            (output, samples[triplets * 3 : triplets * 3 + 1])
+        )
+    return output.tobytes()
+
+
+def _resample_24k_to_16k_pure(data: bytes) -> bytes:
+    """Resample using the dependency-free linear interpolation fallback."""
+    num_samples = len(data) // 2
+    if num_samples == 0:
+        return b""
+
+    samples = struct.unpack(f"<{num_samples}h", data[: num_samples * 2])
     output = []
     i = 0
     while i < num_samples - 2:

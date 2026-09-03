@@ -635,6 +635,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                 try:
                     first_chunk = True
                     audio_buffer = bytearray()
+                    diagnostics_enabled = _LOGGER.isEnabledFor(logging.DEBUG)
                     pcm_for_diag: list[bytes] = []
                     chunk_count = 0
 
@@ -664,7 +665,8 @@ class GeminiLiveSTT(SpeechToTextEntity):
                             del audio_buffer[:OPTIMAL_STREAM_CHUNK_SIZE]
 
                             chunk_count += 1
-                            pcm_for_diag.append(dispatch_chunk)
+                            if diagnostics_enabled:
+                                pcm_for_diag.append(dispatch_chunk)
                             _LOGGER.debug(
                                 "[turn=%s] Shipping optimized media chunk %d (%d bytes)",
                                 turn_id,
@@ -687,7 +689,8 @@ class GeminiLiveSTT(SpeechToTextEntity):
                     if len(audio_buffer) > 0 and not gemini_replied.is_set():
                         chunk_count += 1
                         dispatch_chunk = bytes(audio_buffer)
-                        pcm_for_diag.append(dispatch_chunk)
+                        if diagnostics_enabled:
+                            pcm_for_diag.append(dispatch_chunk)
                         _LOGGER.debug(
                             "[turn=%s] flushing trailing audio chunk size=%d",
                             turn_id,
@@ -701,7 +704,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                         )
                         audio_sent = True
 
-                    if pcm_for_diag:
+                    if diagnostics_enabled and pcm_for_diag:
                         _LOGGER.warning(
                             "[turn=%s] Finished voice streaming. Total blocks dispatched=%d. Metrics=%s",
                             turn_id,
