@@ -28,6 +28,7 @@ class PipelineTurn:
     assistant_text: str
     audio: bytes | AudioStream
     assistant_text_stream: TextStream | None = None
+    complete_conversation: bool = False
 
 
 class AudioStream:

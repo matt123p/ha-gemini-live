@@ -1143,13 +1143,19 @@ class GeminiLiveSTT(SpeechToTextEntity):
         else:
             assistant_text = response_text
 
-        if assistant_text:
+        conversation_complete = not session_manager.should_continue_conversation(
+            conversation_id
+        )
+        if assistant_text or conversation_complete:
             turn_store.add_voice_turn(
                 PipelineTurn(
                     conversation_id=conversation_id,
                     user_text=final_text,
-                    assistant_text=assistant_text,
+                    assistant_text=(
+                        assistant_text or GEMINI_LIVE_TTS_PLACEHOLDER
+                    ),
                     audio=b"",
+                    complete_conversation=conversation_complete,
                 )
             )
 
@@ -1244,6 +1250,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                             user_text=user_message,
                             assistant_text=user_message,
                             audio=b"",
+                            complete_conversation=True,
                         )
                     )
                     _LOGGER.warning(

@@ -425,6 +425,8 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
 
         voice_turn = turn_store.take_voice_turn(conversation_id, input_text)
         if voice_turn:
+            if voice_turn.complete_conversation:
+                session_manager.complete_conversation(conversation_id)
             user_transcript = input_text
             fallback_assistant_text = _ensure_unique_tts_placeholder(
                 voice_turn.assistant_text
