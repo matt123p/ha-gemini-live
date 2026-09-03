@@ -10,7 +10,7 @@ except ImportError:  # pragma: no cover - numpy is supplied by Home Assistant
 
 
 def set_detailed_logging(enabled: bool) -> None:
-    """Set package logging verbosity for Gemini Live."""
+    """Set package logging verbosity for live model providers."""
     level = logging.DEBUG if enabled else logging.ERROR
     logging.getLogger("custom_components.gemini_live").setLevel(level)
 
@@ -65,6 +65,22 @@ def resample_24k_to_16k(data: bytes) -> bytes:
     if np is not None:
         return _resample_24k_to_16k_numpy(data)
     return _resample_24k_to_16k_pure(data)
+
+
+def resample_16k_to_24k(data: bytes) -> bytes:
+    """Resample raw 16-bit signed PCM mono audio from 16kHz to 24kHz."""
+    num_samples = len(data) // 2
+    if num_samples == 0:
+        return b""
+    samples = struct.unpack(f"<{num_samples}h", data[: num_samples * 2])
+    output: list[int] = []
+    for index in range(0, num_samples - 1, 2):
+        first = samples[index]
+        second = samples[index + 1]
+        output.extend((first, (first + second) // 2, second))
+    if num_samples % 2:
+        output.append(samples[-1])
+    return struct.pack(f"<{len(output)}h", *output)
 
 
 def _resample_24k_to_16k_numpy(data: bytes) -> bytes:

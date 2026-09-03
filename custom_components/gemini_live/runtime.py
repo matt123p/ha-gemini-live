@@ -1,4 +1,4 @@
-"""Runtime state for persistent Gemini Live conversations and pipeline turns."""
+"""Runtime state for persistent live-model conversations and pipeline turns."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import asyncio
 from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 import logging
@@ -16,12 +16,14 @@ from weakref import WeakValueDictionary
 
 from homeassistant.core import HomeAssistant
 
+from .live import LiveClient, LiveConfig, LiveSession
+
 _LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
 class PipelineTurn:
-    """A Gemini turn waiting for later pipeline stages."""
+    """A live-model turn waiting for later pipeline stages."""
 
     conversation_id: str
     user_text: str
@@ -32,7 +34,7 @@ class PipelineTurn:
 
 
 class AudioStream:
-    """Buffer one Gemini audio response for the TTS stage."""
+    """Buffer one live-model audio response for the TTS stage."""
 
     def __init__(self) -> None:
         """Initialize an audio stream."""
@@ -57,7 +59,7 @@ class AudioStream:
 
 
 class TextStream:
-    """Buffer one Gemini response transcript for the conversation stage."""
+    """Buffer one live-model response transcript for the conversation stage."""
 
     def __init__(self) -> None:
         """Initialize a text stream."""
@@ -184,7 +186,7 @@ class TurnStore:
 
 @dataclass(slots=True)
 class _LiveConnection:
-    """An open Gemini Live connection."""
+    """An open live-model connection."""
 
     context_manager: Any
     session: Any
@@ -192,7 +194,7 @@ class _LiveConnection:
 
 
 class LiveSessionManager:
-    """Own one open Gemini Live connection per Home Assistant conversation."""
+    """Own one live-model connection per Home Assistant conversation."""
 
     def __init__(self) -> None:
         """Initialize the manager."""
@@ -207,12 +209,11 @@ class LiveSessionManager:
     async def acquire(
         self,
         conversation_id: str,
-        client: Any,
-        model: str,
-        config: dict[str, Any],
-    ) -> AsyncIterator[Any]:
+        client: LiveClient,
+        config: LiveConfig,
+    ) -> AsyncIterator[LiveSession]:
         """Yield the conversation's open session, reconnecting when necessary."""
-        signature = self._config_signature(model, config)
+        signature = self._config_signature(config)
         conversation_lock = self._lock_for(conversation_id)
         async with conversation_lock:
             connection = self._connections.get(conversation_id)
@@ -223,7 +224,7 @@ class LiveSessionManager:
                 await self._async_close(conversation_id, connection)
                 connection = None
             if connection is None:
-                context_manager = client.aio.live.connect(model=model, config=config)
+                context_manager = client.connect(config)
                 session = await context_manager.__aenter__()
                 connection = _LiveConnection(
                     context_manager=context_manager,
@@ -232,7 +233,7 @@ class LiveSessionManager:
                 )
                 self._connections[conversation_id] = connection
                 _LOGGER.info(
-                    "Opened Gemini Live session for conversation %s with config %s",
+                    "Opened live-model session for conversation %s with config %s",
                     conversation_id,
                     signature[:12],
                 )
@@ -276,7 +277,7 @@ class LiveSessionManager:
             self._cleanup_registered.discard(conversation_id)
             hass.async_create_task(
                 self.async_close(conversation_id),
-                f"close Gemini Live conversation {conversation_id}",
+                f"close live-model conversation {conversation_id}",
             )
 
         chat_session.async_on_cleanup(close_live_session)
@@ -300,16 +301,20 @@ class LiveSessionManager:
     @staticmethod
     def _is_open(session: Any) -> bool:
         """Return whether the SDK's websocket is still open, when observable."""
+        if isinstance(is_open := getattr(session, "is_open", None), bool):
+            return is_open
         websocket = getattr(session, "_ws", None)
+        if getattr(websocket, "closed", False):
+            return False
         state = getattr(websocket, "state", None)
         state_name = getattr(state, "name", None)
         return state_name is None or state_name == "OPEN"
 
     @staticmethod
-    def _config_signature(model: str, config: dict[str, Any]) -> str:
+    def _config_signature(config: LiveConfig) -> str:
         """Return a stable signature for settings fixed when a Live session opens."""
         payload = json.dumps(
-            {"model": model, "config": config},
+            asdict(config),
             sort_keys=True,
             separators=(",", ":"),
             default=str,
@@ -329,7 +334,7 @@ class LiveSessionManager:
             await connection.context_manager.__aexit__(None, None, None)
         except Exception:  # noqa: BLE001
             _LOGGER.debug(
-                "Error closing Gemini Live session for conversation %s",
+                "Error closing live-model session for conversation %s",
                 conversation_id,
                 exc_info=True,
             )

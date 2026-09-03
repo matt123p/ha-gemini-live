@@ -1,7 +1,6 @@
-"""Speech-to-Text platform for Gemini Live."""
+"""Shared speech-to-text platform for realtime model providers."""
 
 import asyncio
-import codecs
 from collections.abc import AsyncIterable, Callable
 import datetime
 import logging
@@ -10,8 +9,6 @@ import time
 from uuid import uuid4
 from typing import Any
 
-from google import genai
-from google.genai import types
 from homeassistant.components.stt import (
     AudioBitRates,
     AudioChannels,
@@ -26,6 +23,7 @@ from homeassistant.components.stt import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import chat_session, llm
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.issue_registry import (
     IssueSeverity,
@@ -33,16 +31,21 @@ from homeassistant.helpers.issue_registry import (
     async_delete_issue,
 )
 
+from .gemini import GeminiLiveClient, async_create_gemini_client
+from .live import LiveConfig, LiveTool, LiveToolResponse
 from .const import (
     CONF_API_KEY,
     CONF_DETAILED_LOGGING,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
+    CONF_PROVIDER,
     CONF_SYSTEM_INSTRUCTION,
     CONF_SHOW_TEXT,
     CONF_TRANSCRIBE_GEMINI,
+    CONF_TRANSCRIBE_GPT,
     CONF_VOICE,
     DEFAULT_TRANSCRIBE_GEMINI,
+    DEFAULT_TRANSCRIBE_GPT,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_SYSTEM_INSTRUCTION,
     DEFAULT_SHOW_TEXT,
@@ -50,8 +53,11 @@ from .const import (
     GEMINI_LIVE_TTS_PLACEHOLDER,
     GEMINI_SESSION_MANAGER_KEY,
     GEMINI_TURN_STORE_KEY,
+    PROVIDER_GEMINI,
+    PROVIDER_OPENAI,
     SUPPORTED_LANGUAGES,
 )
+from .openai import OpenAIRealtimeClient
 from .runtime import (
     AudioStream,
     PipelineTurn,
@@ -64,20 +70,6 @@ _LOGGER = logging.getLogger(__name__)
 
 # Target optimal chunk payload size (100ms of 16kHz 16-bit mono PCM = 3200 bytes)
 OPTIMAL_STREAM_CHUNK_SIZE = 3200
-
-# Schema keys supported by the Gemini Live function declaration format
-_SUPPORTED_SCHEMA_KEYS = {
-    "type",
-    "format",
-    "description",
-    "nullable",
-    "enum",
-    "max_items",
-    "min_items",
-    "properties",
-    "required",
-    "items",
-}
 
 _SEARCH_TOOL_HINTS = ("search", "web", "google")
 
@@ -124,18 +116,14 @@ _END_CONVERSATION_INSTRUCTION = (
     f"{END_CONVERSATION_TOOL_NAME} so Home Assistant stops listening."
 )
 
-_END_CONVERSATION_TOOL = {
-    "function_declarations": [
-        {
-            "name": END_CONVERSATION_TOOL_NAME,
-            "description": (
-                "End the current voice conversation so Home Assistant stops "
-                "listening for a follow-up turn. Call only when the user indicates "
-                "that the conversation is finished."
-            ),
-        }
-    ]
-}
+_END_CONVERSATION_TOOL = LiveTool(
+    name=END_CONVERSATION_TOOL_NAME,
+    description=(
+        "End the current voice conversation so Home Assistant stops listening "
+        "for a follow-up turn. Call only when the user indicates that the "
+        "conversation is finished."
+    ),
+)
 
 SHOW_TEXT_TOOL_NAME = "show_text"
 
@@ -147,27 +135,23 @@ _SHOW_TEXT_INSTRUCTION = (
     "will see any text from you."
 )
 
-_SHOW_TEXT_TOOL = {
-    "function_declarations": [
-        {
-            "name": SHOW_TEXT_TOOL_NAME,
-            "description": (
-                "Display text or markdown to the user. Call this when you want to show written details, "
-                "instructions, or formatted text that the user should read."
-            ),
-            "parameters": {
-                "type": "OBJECT",
-                "properties": {
-                    "text": {
-                        "type": "STRING",
-                        "description": "The text or markdown formatted text to display to the user.",
-                    }
-                },
-                "required": ["text"],
-            },
-        }
-    ]
-}
+_SHOW_TEXT_TOOL = LiveTool(
+    name=SHOW_TEXT_TOOL_NAME,
+    description=(
+        "Display text or markdown to the user. Call this when you want to show "
+        "written details, instructions, or formatted text that the user should read."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "The text or markdown formatted text to display to the user.",
+            }
+        },
+        "required": ["text"],
+    },
+)
 
 
 
@@ -211,58 +195,12 @@ def _prepayment_credits_issue_id(entry_id: str) -> str:
 # Schema / tool helpers
 # ---------------------------------------------------------------------------
 
-def _camel_to_snake(name: str) -> str:
-    """Convert camelCase key to snake_case (matches official integration)."""
-    return "".join(["_" + c.lower() if c.isupper() else c for c in name]).lstrip("_")
-
-
-def _format_schema_for_gemini(schema: dict[str, Any]) -> dict[str, Any]:
-    """Convert an OpenAPI schema dict to Gemini Live-compatible format."""
-    if subschemas := schema.get("allOf"):
-        for subschema in subschemas:
-            if "type" in subschema:
-                return _format_schema_for_gemini(subschema)
-        return _format_schema_for_gemini(subschemas[0])
-
-    result: dict[str, Any] = {}
-    for key, val in schema.items():
-        key = _camel_to_snake(key)
-        if key not in _SUPPORTED_SCHEMA_KEYS:
-            continue
-        if key == "type":
-            val = val.upper()
-        elif key == "format":
-            if schema.get("type") == "string" and val not in ("enum", "date-time"):
-                continue
-            if schema.get("type") == "number" and val not in ("float", "double"):
-                continue
-            if schema.get("type") == "integer" and val not in ("int32", "int64"):
-                continue
-            if schema.get("type") not in ("string", "number", "integer"):
-                continue
-        elif key == "items":
-            val = _format_schema_for_gemini(val)
-        elif key == "properties":
-            val = {k: _format_schema_for_gemini(v) for k, v in val.items()}
-        result[key] = val
-
-    if result.get("enum") and result.get("type") != "STRING":
-        result["type"] = "STRING"
-        result["enum"] = [str(item) for item in result["enum"]]
-
-    if result.get("type") == "OBJECT" and not result.get("properties"):
-        result["properties"] = {"json": {"type": "STRING"}}
-        result["required"] = []
-
-    return result
-
-
-def _format_tool_for_gemini_live(
+def _format_tool_for_live(
     tool: llm.Tool,
     custom_serializer: Callable[[Any], Any] | None = None,
     encourage_web_search: bool = False,
-) -> dict[str, Any]:
-    """Convert an HA LLM Tool to a Gemini Live functionDeclaration dict."""
+) -> LiveTool:
+    """Convert a Home Assistant tool to the provider-neutral format."""
     try:
         if tool.parameters.schema:
             try:
@@ -282,50 +220,37 @@ def _format_tool_for_gemini_live(
                     tool.parameters,
                     custom_serializer=custom_serializer,
                 )
-            parameters: dict | None = _format_schema_for_gemini(raw_schema)
+            parameters: dict[str, Any] | None = raw_schema
         else:
             parameters = None
     except Exception as exc:  # noqa: BLE001
         _LOGGER.debug("Could not convert schema for tool %s: %s", tool.name, exc)
         parameters = None
 
-    decl: dict[str, Any] = {
-        "name": tool.name,
-        "description": tool.description or f"Execute {tool.name}",
-    }
+    description = tool.description or f"Execute {tool.name}"
     if encourage_web_search and _is_search_tool_name(tool.name):
-        decl["description"] = (
-            f"{decl['description']} Use this tool for current, latest, recent, "
+        description = (
+            f"{description} Use this tool for current, latest, recent, "
             "time-sensitive, or explicitly requested online information."
         )
-    if parameters:
-        decl["parameters"] = parameters
-    return decl
+    return LiveTool(tool.name, description, parameters)
 
 
-def _format_tools_for_gemini_live(
+def _format_tools_for_live(
     tools: list[llm.Tool],
     custom_serializer: Callable[[Any], Any] | None = None,
     encourage_web_search: bool = False,
-) -> list[dict[str, Any]]:
-    """Convert HA LLM tools to Gemini Live tool declarations."""
+) -> list[LiveTool]:
+    """Convert Home Assistant tools to provider-neutral declarations."""
     return [
-        {
-            "function_declarations": [
-                _format_tool_for_gemini_live(
-                    tool,
-                    custom_serializer,
-                    encourage_web_search,
-                )
-            ]
-        }
+        _format_tool_for_live(tool, custom_serializer, encourage_web_search)
         for tool in tools
     ]
 
 
 def _add_end_conversation_tool(
-    tools: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
+    tools: list[LiveTool],
+) -> list[LiveTool]:
     """Add the integration-owned conversation completion callback."""
     return [*tools, _END_CONVERSATION_TOOL]
 
@@ -336,8 +261,8 @@ def _add_end_conversation_instruction(system_instruction: str) -> str:
 
 
 def _add_show_text_tool(
-    tools: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
+    tools: list[LiveTool],
+) -> list[LiveTool]:
     """Add the integration-owned show text callback."""
     return [*tools, _SHOW_TEXT_TOOL]
 
@@ -359,17 +284,6 @@ def _add_search_tool_instruction(
     ):
         return system_instruction
     return f"{system_instruction}\n\n{_SEARCH_TOOL_INSTRUCTION}"
-
-
-def _escape_decode(value: Any) -> Any:
-    """Recursively escape-decode values returned by the Gemini SDK."""
-    if isinstance(value, str):
-        return codecs.escape_decode(bytes(value, "utf-8"))[0].decode("utf-8")
-    if isinstance(value, list):
-        return [_escape_decode(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _escape_decode(item) for key, item in value.items()}
-    return value
 
 
 def _validate_tool_results(value: Any) -> Any:
@@ -427,24 +341,49 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Gemini Live STT platform."""
-    async_add_entities([GeminiLiveSTT(config_entry)])
+    """Set up the selected realtime provider's STT platform."""
+    config = {**config_entry.data, **config_entry.options}
+    provider = config.get(CONF_PROVIDER, PROVIDER_GEMINI)
+    entity_class = GPTRealtimeSTT if provider == PROVIDER_OPENAI else GeminiLiveSTT
+    async_add_entities([entity_class(config_entry)])
 
 
 # ---------------------------------------------------------------------------
 # STT Entity
 # ---------------------------------------------------------------------------
 
-class GeminiLiveSTT(SpeechToTextEntity):
-    """Gemini Live STT Entity."""
+class LiveModelSTT(SpeechToTextEntity):
+    """Shared speech-to-text pipeline for realtime model providers."""
 
     _attr_should_poll = False
+    integration_domain = DOMAIN
+    integration_name = "Live Model"
+    session_manager_key = GEMINI_SESSION_MANAGER_KEY
+    turn_store_key = GEMINI_TURN_STORE_KEY
+    tts_placeholder = GEMINI_LIVE_TTS_PLACEHOLDER
+    transcribe_config_key = "transcribe_output"
+    default_transcribe = True
+    default_system_instruction = DEFAULT_SYSTEM_INSTRUCTION
+    supported_language_codes = SUPPORTED_LANGUAGES
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize the STT entity."""
         self.entry = entry
-        self._attr_name = "Gemini Live"
+        self._attr_name = self.integration_name
         self._attr_unique_id = f"{entry.entry_id}_stt"
+
+    async def _async_create_client(self, api_key: str) -> Any:
+        """Create the selected provider adapter."""
+        raise NotImplementedError
+
+    @staticmethod
+    def _api_error_message(exc: BaseException) -> str | None:
+        """Return provider-specific user-visible API errors."""
+        return None
+
+    def _set_detailed_logging(self, enabled: bool) -> None:
+        """Set provider package logging verbosity."""
+        set_detailed_logging(enabled)
 
     @property
     def name(self) -> str:
@@ -462,21 +401,21 @@ class GeminiLiveSTT(SpeechToTextEntity):
         model: str,
         voice: str,
         custom_instruction: str,
-        transcribe_gemini: bool,
+        transcribe_output: bool,
         encourage_web_search: bool,
         show_text: bool,
         result_future: asyncio.Future[SpeechResult],
         conversation_id: str,
         device_id: str | None,
     ) -> SpeechResult:
-        """Process audio using the google-genai Live SDK."""
+        """Process audio using the configured live-model client."""
         turn_id = uuid4().hex[:8]
         show_text_content: str | None = None
         started_at = time.monotonic()
-        entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
-        session_manager = entry_data[GEMINI_SESSION_MANAGER_KEY]
+        entry_data = self.hass.data[self.integration_domain][self.entry.entry_id]
+        session_manager = entry_data[self.session_manager_key]
         session_manager.reset_conversation(conversation_id)
-        turn_store = entry_data[GEMINI_TURN_STORE_KEY]
+        turn_store = entry_data[self.turn_store_key]
         active_chat_session = chat_session.current_session.get()
         if (
             active_chat_session is None
@@ -501,14 +440,14 @@ class GeminiLiveSTT(SpeechToTextEntity):
 
         llm_api: llm.APIInstance | None = None
         ha_tools: list[llm.Tool] = []
-        system_instruction = custom_instruction or DEFAULT_SYSTEM_INSTRUCTION
+        system_instruction = custom_instruction or self.default_system_instruction
 
         try:
             llm_api = await llm.async_get_api(
                 hass=self.hass,
                 api_id=llm.LLM_API_ASSIST,
                 llm_context=llm.LLMContext(
-                    platform=DOMAIN,
+                    platform=self.integration_domain,
                     context=Context(),
                     language=metadata.language or "en",
                     assistant="conversation",
@@ -521,7 +460,9 @@ class GeminiLiveSTT(SpeechToTextEntity):
             if custom_instruction:
                 system_instruction = f"{custom_instruction}\n\n{api_prompt}"
             else:
-                system_instruction = DEFAULT_SYSTEM_INSTRUCTION + "\n\n" + api_prompt
+                system_instruction = (
+                    self.default_system_instruction + "\n\n" + api_prompt
+                )
             system_instruction = _add_search_tool_instruction(
                 system_instruction,
                 ha_tools,
@@ -535,11 +476,11 @@ class GeminiLiveSTT(SpeechToTextEntity):
             )
 
         system_instruction = _add_end_conversation_instruction(system_instruction)
-        if not transcribe_gemini and show_text:
+        if not transcribe_output and show_text:
             system_instruction = _add_show_text_instruction(system_instruction)
 
-        gemini_tools = _add_end_conversation_tool(
-            _format_tools_for_gemini_live(
+        live_tools = _add_end_conversation_tool(
+            _format_tools_for_live(
                 ha_tools,
                 llm_api.custom_serializer,
                 encourage_web_search,
@@ -547,70 +488,48 @@ class GeminiLiveSTT(SpeechToTextEntity):
             if llm_api
             else []
         )
-        if not transcribe_gemini and show_text:
-            gemini_tools = _add_show_text_tool(gemini_tools)
-        function_declarations = [
-            declaration
-            for tool in gemini_tools
-            for declaration in tool["function_declarations"]
-        ]
+        if not transcribe_output and show_text:
+            live_tools = _add_show_text_tool(live_tools)
         _LOGGER.debug(
-            "Exposing %d tools to Gemini Live: %s",
-            len(function_declarations),
-            [definition["name"] for definition in function_declarations],
+            "Exposing %d tools to the live model: %s",
+            len(live_tools),
+            [definition.name for definition in live_tools],
         )
 
         _LOGGER.warning(
-            "[turn=%s] creating genai client", turn_id
+            "[turn=%s] creating provider client", turn_id
         )
-        client = await self.hass.async_add_executor_job(
-            lambda: genai.Client(api_key=api_key)
-        )
+        client = await self._async_create_client(api_key)
         _LOGGER.warning(
-            "[turn=%s] genai client created live_config_keys=%s tool_count=%d system_instruction_chars=%d",
+            "[turn=%s] provider client created tool_count=%d system_instruction_chars=%d",
             turn_id,
-            ["response_modalities", "speech_config", "system_instruction", "input_audio_transcription", "output_audio_transcription", "realtime_input_config"] + (["tools"] if function_declarations else []),
-            len(function_declarations),
+            len(live_tools),
             len(system_instruction),
         )
-        live_config: dict[str, Any] = {
-            "response_modalities": ["AUDIO"],
-            "speech_config": {
-                "voice_config": {
-                    "prebuilt_voice_config": {"voice_name": voice}
-                }
-            },
-            "system_instruction": {"parts": [{"text": system_instruction}]},
-            "input_audio_transcription": {},
-            "realtime_input_config": {
-                "turn_coverage": "TURN_INCLUDES_ONLY_ACTIVITY"
-            },
-        }
-        if transcribe_gemini:
-            live_config["output_audio_transcription"] = {}
-        if gemini_tools:
-            live_config["tools"] = gemini_tools
+        live_config = LiveConfig(
+            model=model,
+            voice=voice,
+            system_instruction=system_instruction,
+            tools=live_tools,
+            transcribe_output=transcribe_output,
+        )
 
         _LOGGER.warning(
-            "[turn=%s] live config prepared model=%s response_modalities=%s voice=%s has_tools=%s input_transcription=%s output_transcription=%s realtime_turn_coverage=%s",
+            "[turn=%s] live config prepared model=%s voice=%s has_tools=%s output_transcription=%s",
             turn_id,
             model,
-            live_config["response_modalities"],
             voice,
-            bool(function_declarations),
-            bool(live_config.get("input_audio_transcription") is not None),
-            bool(live_config.get("output_audio_transcription") is not None),
-            live_config["realtime_input_config"].get("turn_coverage"),
+            bool(live_tools),
+            transcribe_output,
         )
 
         native_audio_model = "native-audio" in (model or "")
         _LOGGER.warning(
-            "[turn=%s] setup model=%s native_audio_model=%s response_modalities=%s tools=%d",
+            "[turn=%s] setup model=%s native_audio_model=%s tools=%d",
             turn_id,
             model,
             native_audio_model,
-            live_config["response_modalities"],
-            len(function_declarations),
+            len(live_tools),
         )
 
         text_response_parts: list[str] = []
@@ -623,31 +542,30 @@ class GeminiLiveSTT(SpeechToTextEntity):
         first_audio = asyncio.Event()
         input_transcript_received = asyncio.Event()
         response_audio_stream = AudioStream()
-        response_text_stream = TextStream() if transcribe_gemini else None
+        response_text_stream = TextStream() if transcribe_output else None
 
         _LOGGER.warning(
-            "[turn=%s] acquiring Gemini Live session conversation=%s",
+            "[turn=%s] acquiring live-model session conversation=%s",
             turn_id,
             conversation_id,
         )
         async with session_manager.acquire(
             conversation_id,
             client,
-            model,
             live_config,
         ) as session:
             async_delete_issue(
                 self.hass,
-                DOMAIN,
+                self.integration_domain,
                 _spending_cap_issue_id(self.entry.entry_id),
             )
             async_delete_issue(
                 self.hass,
-                DOMAIN,
+                self.integration_domain,
                 _prepayment_credits_issue_id(self.entry.entry_id),
             )
             _LOGGER.warning(
-                "[turn=%s] acquired Gemini Live session conversation=%s",
+                "[turn=%s] acquired live-model session conversation=%s",
                 turn_id,
                 conversation_id,
             )
@@ -668,7 +586,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                             continue
                         if gemini_replied.is_set():
                             _LOGGER.warning(
-                                "[turn=%s] send_audio stopped because Gemini started replying",
+                                "[turn=%s] send_audio stopped because the model started replying",
                                 turn_id,
                             )
                             break
@@ -696,16 +614,11 @@ class GeminiLiveSTT(SpeechToTextEntity):
                                 len(dispatch_chunk),
                             )
                             _LOGGER.debug(
-                                "[turn=%s] calling session.send_realtime_input audio_pcm_16k chunk_size=%d",
+                                "[turn=%s] sending audio_pcm_16k chunk_size=%d",
                                 turn_id,
                                 len(dispatch_chunk),
                             )
-                            await session.send_realtime_input(
-                                audio=types.Blob(
-                                    data=dispatch_chunk,
-                                    mime_type="audio/pcm;rate=16000",
-                                )
-                            )
+                            await session.send_audio(dispatch_chunk)
                             audio_sent = True
 
                     if len(audio_buffer) > 0 and not gemini_replied.is_set():
@@ -718,12 +631,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                             turn_id,
                             len(dispatch_chunk),
                         )
-                        await session.send_realtime_input(
-                            audio=types.Blob(
-                                data=dispatch_chunk,
-                                mime_type="audio/pcm;rate=16000",
-                            )
-                        )
+                        await session.send_audio(dispatch_chunk)
                         audio_sent = True
 
                     if diagnostics_enabled and pcm_for_diag:
@@ -736,10 +644,10 @@ class GeminiLiveSTT(SpeechToTextEntity):
 
                     if audio_sent and not gemini_replied.is_set():
                         _LOGGER.debug("[turn=%s] signalling audio stream end", turn_id)
-                        await session.send_realtime_input(audio_stream_end=True)
+                        await session.end_audio()
                 except asyncio.CancelledError:
                     _LOGGER.warning(
-                        "[turn=%s] audio sender cancelled — Gemini started replying",
+                        "[turn=%s] audio sender cancelled — the model started replying",
                         turn_id,
                     )
                     raise
@@ -753,10 +661,11 @@ class GeminiLiveSTT(SpeechToTextEntity):
                     _LOGGER.warning("[turn=%s] receive_responses started", turn_id)
                     async for response in session.receive():
                         _LOGGER.warning(
-                            "[turn=%s] received response tool_call=%s server_content=%s go_away=%s session_resumption_update=%s",
+                            "[turn=%s] received event tool_calls=%s audio=%s text=%s go_away=%s session_resumption_update=%s",
                             turn_id,
-                            bool(response.tool_call),
-                            bool(response.server_content),
+                            bool(response.tool_calls),
+                            bool(response.audio),
+                            bool(response.text or response.output_transcript),
                             bool(response.go_away),
                             bool(response.session_resumption_update),
                         )
@@ -773,9 +682,9 @@ class GeminiLiveSTT(SpeechToTextEntity):
                                 response.session_resumption_update,
                             )
 
-                        if response.tool_call:
+                        if response.tool_calls:
                             last_response_activity = time.monotonic()
-                            function_calls = response.tool_call.function_calls or []
+                            function_calls = response.tool_calls
                             function_responses = []
 
                             _LOGGER.warning(
@@ -786,8 +695,8 @@ class GeminiLiveSTT(SpeechToTextEntity):
 
                             for call in function_calls:
                                 tool_name = call.name or ""
-                                tool_args = _escape_decode(call.args or {})
-                                call_id = call.id
+                                tool_args = call.arguments
+                                call_id = call.call_id
                                 _LOGGER.debug(
                                     "[turn=%s] LLM tool call name=%s id=%s arguments=%r",
                                     turn_id,
@@ -843,74 +752,41 @@ class GeminiLiveSTT(SpeechToTextEntity):
                                 )
 
                                 function_responses.append(
-                                    types.FunctionResponse(
-                                        name=tool_name,
-                                        id=call_id,
-                                        response=tool_result,
-                                    )
+                                    LiveToolResponse(tool_name, call_id, tool_result)
                                 )
 
                             if function_responses:
                                 _LOGGER.warning(
-                                    "[turn=%s] sending %d tool response(s) to Gemini",
+                                    "[turn=%s] sending %d tool response(s) to the live model",
                                     turn_id,
                                     len(function_responses),
                                 )
-                                await session.send_tool_response(
-                                    function_responses=function_responses
-                                )
+                                await session.send_tool_responses(function_responses)
                                 _LOGGER.warning(
-                                    "[turn=%s] sent %d tool response(s) back to Gemini",
+                                    "[turn=%s] sent %d tool response(s) to the live model",
                                     turn_id,
                                     len(function_responses),
                                 )
 
-                        content = response.server_content
-                        if not content:
-                            _LOGGER.debug("[turn=%s] response had no server_content", turn_id)
-                            continue
                         last_response_activity = time.monotonic()
 
-                        if content.model_turn:
-                            parts = content.model_turn.parts or []
-                            _LOGGER.warning(
-                                "[turn=%s] modelTurn parts=%d turnComplete=%s",
-                                turn_id,
-                                len(parts),
-                                content.turn_complete,
-                            )
-                            for part in parts:
-                                if part.text:
-                                    _LOGGER.debug(
-                                        "[turn=%s] model text chunk len=%d",
-                                        turn_id,
-                                        len(part.text),
-                                    )
-                                    text_response_parts.append(part.text)
-                                    if response_text_stream is not None:
-                                        response_text_stream.add_chunk(part.text)
-                                if part.inline_data and part.inline_data.data:
-                                    if not gemini_replied.is_set():
-                                        gemini_replied.set()
-                                        _LOGGER.warning(
-                                            "[turn=%s] gemini_replied set on first inline audio chunk",
-                                            turn_id,
-                                        )
-                                    raw_chunk = part.inline_data.data
-                                    audio_response_chunk_count += 1
-                                    audio_response_bytes += len(raw_chunk)
-                                    resampled_chunk = resample_24k_to_16k(raw_chunk)
-                                    response_audio_stream.add_chunk(resampled_chunk)
-                                    first_audio.set()
-                                    _LOGGER.debug(
-                                        "[turn=%s] inline audio chunk bytes=%d total_audio_chunks=%d",
-                                        turn_id,
-                                        len(raw_chunk),
-                                        audio_response_chunk_count,
-                                    )
+                        if response.text:
+                            text_response_parts.append(response.text)
+                            if response_text_stream is not None:
+                                response_text_stream.add_chunk(response.text)
 
-                        if content.output_transcription and content.output_transcription.text:
-                            transcription = content.output_transcription.text
+                        if response.audio:
+                            if not gemini_replied.is_set():
+                                gemini_replied.set()
+                            audio_response_chunk_count += 1
+                            audio_response_bytes += len(response.audio)
+                            response_audio_stream.add_chunk(
+                                resample_24k_to_16k(response.audio)
+                            )
+                            first_audio.set()
+
+                        if response.output_transcript:
+                            transcription = response.output_transcript
                             _LOGGER.debug(
                                 "[turn=%s] output transcription chunk len=%d",
                                 turn_id,
@@ -926,8 +802,8 @@ class GeminiLiveSTT(SpeechToTextEntity):
                                 transcription[:200],
                             )
 
-                        if content.input_transcription and content.input_transcription.text:
-                            transcription = content.input_transcription.text
+                        if response.input_transcript:
+                            transcription = response.input_transcript
                             _LOGGER.debug(
                                 "[turn=%s] input transcription chunk len=%d",
                                 turn_id,
@@ -942,7 +818,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                                 transcription[:200],
                             )
 
-                        if content.turn_complete:
+                        if response.turn_complete:
                             if native_audio_model and not gemini_replied.is_set():
                                 _LOGGER.warning(
                                     "[turn=%s] turnComplete before audio; keeping session open and waiting",
@@ -962,7 +838,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                 except Exception as exc:  # noqa: BLE001
                     if _is_connection_closed_ok(exc):
                         _LOGGER.warning(
-                            "[turn=%s] Gemini Live websocket closed normally",
+                            "[turn=%s] live-model connection closed normally",
                             turn_id,
                         )
                     else:
@@ -977,7 +853,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
             _LOGGER.warning("[turn=%s] created send and receive tasks", turn_id)
 
             async def publish_streaming_turn() -> None:
-                """Release the pipeline once Gemini starts producing audio."""
+                """Release the pipeline once the live model starts producing audio."""
                 await first_audio.wait()
                 if not input_transcript_parts:
                     try:
@@ -990,14 +866,14 @@ class GeminiLiveSTT(SpeechToTextEntity):
 
                 user_text = (
                     "".join(input_transcript_parts).strip()
-                    or GEMINI_LIVE_TTS_PLACEHOLDER
+                    or self.tts_placeholder
                 )
                 # HA persistently caches TTS audio by message. A per-turn message
-                # prevents it from replaying an earlier Gemini audio stream.
-                if not transcribe_gemini and show_text and show_text_content is not None:
+                # prevents it from replaying an earlier live-model audio stream.
+                if not transcribe_output and show_text and show_text_content is not None:
                     tts_message = show_text_content
                 else:
-                    tts_message = f"{GEMINI_LIVE_TTS_PLACEHOLDER} {turn_id}"
+                    tts_message = f"{self.tts_placeholder} {turn_id}"
                 turn_store.add_voice_turn(
                     PipelineTurn(
                         conversation_id=conversation_id,
@@ -1023,7 +899,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                 await gemini_replied.wait()
                 if not send_task.done():
                     _LOGGER.warning(
-                        "[turn=%s] cancelling send task because Gemini started replying",
+                        "[turn=%s] cancelling send task because the model started replying",
                         turn_id,
                     )
                     send_task.cancel()
@@ -1068,7 +944,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                         )
                         if remaining <= 0:
                             _LOGGER.warning(
-                                "[turn=%s] cancelling Gemini receive task after %.1fs without response activity",
+                                "[turn=%s] cancelling receive task after %.1fs without response activity",
                                 turn_id,
                                 RESPONSE_INACTIVITY_TIMEOUT,
                             )
@@ -1119,26 +995,26 @@ class GeminiLiveSTT(SpeechToTextEntity):
 
         if first_audio.is_set():
             _LOGGER.warning(
-                "STT: Gemini audio ready: text=%d chars, raw_audio=%d bytes",
+                "STT: live-model audio ready: text=%d chars, raw_audio=%d bytes",
                 len(response_text),
                 all_audio_24k_len,
             )
         else:
-            _LOGGER.warning("STT: No audio response received from Gemini Live")
+            _LOGGER.warning("STT: No audio response received from the live model")
 
         final_text = input_transcript or response_text
         if first_audio.is_set():
             return SpeechResult(
-                input_transcript or GEMINI_LIVE_TTS_PLACEHOLDER,
+                input_transcript or self.tts_placeholder,
                 SpeechResultState.SUCCESS,
             )
         if not final_text:
             _LOGGER.error(
-                "STT: Gemini returned no usable transcript or response text"
+                "STT: Live model returned no usable transcript or response text"
             )
             return SpeechResult(None, SpeechResultState.ERROR)
 
-        if not transcribe_gemini and show_text and show_text_content is not None:
+        if not transcribe_output and show_text and show_text_content is not None:
             assistant_text = show_text_content
         else:
             assistant_text = response_text
@@ -1152,7 +1028,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                     conversation_id=conversation_id,
                     user_text=final_text,
                     assistant_text=(
-                        assistant_text or GEMINI_LIVE_TTS_PLACEHOLDER
+                        assistant_text or self.tts_placeholder
                     ),
                     audio=b"",
                     complete_conversation=conversation_complete,
@@ -1176,7 +1052,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
         model: str,
         voice: str,
         custom_instruction: str,
-        transcribe_gemini: bool,
+        transcribe_output: bool,
         encourage_web_search: bool,
         show_text: bool,
     ) -> SpeechResult:
@@ -1191,14 +1067,14 @@ class GeminiLiveSTT(SpeechToTextEntity):
                 model,
                 voice,
                 custom_instruction,
-                transcribe_gemini,
+                transcribe_output,
                 encourage_web_search,
                 show_text,
                 result_future,
                 conversation_id,
                 device_id,
             ),
-            "Gemini Live audio turn",
+            f"{self.integration_name} audio turn",
         )
 
         def set_final_result(completed_task: asyncio.Task[SpeechResult]) -> None:
@@ -1209,7 +1085,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
             except asyncio.CancelledError:
                 result_future.set_result(SpeechResult(None, SpeechResultState.ERROR))
             except Exception as exc:  # noqa: BLE001
-                if user_message := _user_visible_api_error(exc):
+                if user_message := self._api_error_message(exc):
                     prepayment_credits_depleted = (
                         user_message == _PREPAYMENT_CREDITS_USER_MESSAGE
                     )
@@ -1230,7 +1106,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                     }
                     async_create_issue(
                         self.hass,
-                        DOMAIN,
+                        self.integration_domain,
                         issue_id,
                         is_fixable=False,
                         is_persistent=False,
@@ -1239,11 +1115,13 @@ class GeminiLiveSTT(SpeechToTextEntity):
                         translation_key=translation_key,
                         translation_placeholders=translation_placeholders,
                     )
-                    entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
-                    entry_data[GEMINI_SESSION_MANAGER_KEY].complete_conversation(
+                    entry_data = self.hass.data[self.integration_domain][
+                        self.entry.entry_id
+                    ]
+                    entry_data[self.session_manager_key].complete_conversation(
                         conversation_id
                     )
-                    turn_store = entry_data[GEMINI_TURN_STORE_KEY]
+                    turn_store = entry_data[self.turn_store_key]
                     turn_store.add_voice_turn(
                         PipelineTurn(
                             conversation_id=conversation_id,
@@ -1265,7 +1143,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
                         SpeechResult(user_message, SpeechResultState.SUCCESS)
                     )
                 else:
-                    _LOGGER.exception("Gemini Live audio turn failed")
+                    _LOGGER.exception("%s audio turn failed", self.integration_name)
                     result_future.set_result(
                         SpeechResult(None, SpeechResultState.ERROR)
                     )
@@ -1279,7 +1157,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
 
     @property
     def supported_languages(self) -> list[str]:
-        return SUPPORTED_LANGUAGES
+        return self.supported_language_codes
 
     @property
     def supported_formats(self) -> list[AudioFormats]:
@@ -1306,7 +1184,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
         metadata: SpeechMetadata,
         stream: AsyncIterable[bytes],
     ) -> SpeechResult:
-        """Process the audio stream and send it directly to Gemini Live API."""
+        """Send the audio stream directly to the configured live model."""
         turn_id = uuid4().hex[:8]
         started_at = time.monotonic()
         config = {**self.entry.data, **self.entry.options}
@@ -1314,8 +1192,8 @@ class GeminiLiveSTT(SpeechToTextEntity):
         model = config.get(CONF_MODEL)
         voice = config.get(CONF_VOICE)
         custom_instruction = config.get(CONF_SYSTEM_INSTRUCTION, "")
-        transcribe_gemini = bool(
-            config.get(CONF_TRANSCRIBE_GEMINI, DEFAULT_TRANSCRIBE_GEMINI)
+        transcribe_output = bool(
+            config.get(self.transcribe_config_key, self.default_transcribe)
         )
         encourage_web_search = bool(
             config.get(CONF_ENCOURAGE_WEB_SEARCH, DEFAULT_ENCOURAGE_WEB_SEARCH)
@@ -1323,7 +1201,9 @@ class GeminiLiveSTT(SpeechToTextEntity):
         show_text = bool(
             config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT)
         )
-        set_detailed_logging(bool(config.get(CONF_DETAILED_LOGGING, False)))
+        self._set_detailed_logging(
+            bool(config.get(CONF_DETAILED_LOGGING, False))
+        )
 
         _LOGGER.warning(
             "[turn=%s] STT start language=%s model=%s voice=%s detailed_logging=%s",
@@ -1335,7 +1215,7 @@ class GeminiLiveSTT(SpeechToTextEntity):
         )
 
         if not api_key:
-            _LOGGER.error("API Key not configured for Gemini Live")
+            _LOGGER.error("API key not configured for %s", self.integration_name)
             return SpeechResult(None, SpeechResultState.ERROR)
 
         return await self._async_process_audio_stream_sdk(
@@ -1345,7 +1225,43 @@ class GeminiLiveSTT(SpeechToTextEntity):
             model,
             voice,
             custom_instruction,
-            transcribe_gemini,
+            transcribe_output,
             encourage_web_search,
             show_text,
         )
+
+
+class GeminiLiveSTT(LiveModelSTT):
+    """Stream a Home Assistant voice turn through Gemini Live."""
+
+    integration_name = "Gemini Live"
+    transcribe_config_key = CONF_TRANSCRIBE_GEMINI
+    default_transcribe = DEFAULT_TRANSCRIBE_GEMINI
+
+    async def _async_create_client(self, api_key: str) -> GeminiLiveClient:
+        """Create the Gemini provider adapter."""
+        return await async_create_gemini_client(self.hass, api_key)
+
+    @staticmethod
+    def _api_error_message(exc: BaseException) -> str | None:
+        """Return Google billing errors that the user can resolve."""
+        return _user_visible_api_error(exc)
+
+
+class GPTRealtimeSTT(LiveModelSTT):
+    """Stream a Home Assistant voice turn through OpenAI Realtime."""
+
+    integration_name = "GPT Realtime"
+    tts_placeholder = "-- gpt realtime --"
+    transcribe_config_key = CONF_TRANSCRIBE_GPT
+    default_transcribe = DEFAULT_TRANSCRIBE_GPT
+    default_system_instruction = DEFAULT_SYSTEM_INSTRUCTION
+
+    async def _async_create_client(self, api_key: str) -> OpenAIRealtimeClient:
+        """Create an OpenAI Realtime WebSocket client."""
+        return OpenAIRealtimeClient(async_get_clientsession(self.hass), api_key)
+
+    @staticmethod
+    def _api_error_message(exc: BaseException) -> str | None:
+        """OpenAI errors are currently surfaced through normal HA error handling."""
+        return None

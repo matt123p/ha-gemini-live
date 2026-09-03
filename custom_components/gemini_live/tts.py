@@ -14,7 +14,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, GEMINI_TURN_STORE_KEY, SUPPORTED_LANGUAGES
+from .const import (
+    CONF_PROVIDER,
+    DOMAIN,
+    GEMINI_TURN_STORE_KEY,
+    PROVIDER_GEMINI,
+    PROVIDER_OPENAI,
+    SUPPORTED_LANGUAGES,
+)
 from .runtime import AudioStream
 from .utils import pcm_to_wav, streaming_wav_header
 
@@ -27,7 +34,10 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Gemini Live TTS platform."""
-    async_add_entities([GeminiLiveTTS(config_entry)])
+    config = {**config_entry.data, **config_entry.options}
+    provider = config.get(CONF_PROVIDER, PROVIDER_GEMINI)
+    entity_class = GPTRealtimeTTS if provider == PROVIDER_OPENAI else GeminiLiveTTS
+    async_add_entities([entity_class(config_entry)])
 
 
 class GeminiLiveTTS(TextToSpeechEntity):
@@ -44,11 +54,15 @@ class GeminiLiveTTS(TextToSpeechEntity):
     """
 
     _attr_should_poll = False
+    integration_domain = DOMAIN
+    integration_name = "Gemini Live"
+    turn_store_key = GEMINI_TURN_STORE_KEY
+    supported_language_codes = SUPPORTED_LANGUAGES
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize the TTS entity."""
         self.entry = entry
-        self._attr_name = "Gemini Live"
+        self._attr_name = self.integration_name
         self._attr_unique_id = f"{entry.entry_id}_tts"
 
     @property
@@ -59,7 +73,7 @@ class GeminiLiveTTS(TextToSpeechEntity):
     @property
     def supported_languages(self) -> list[str]:
         """Return supported languages."""
-        return SUPPORTED_LANGUAGES
+        return self.supported_language_codes
 
     @property
     def supported_options(self) -> list[str]:
@@ -73,8 +87,8 @@ class GeminiLiveTTS(TextToSpeechEntity):
         options: dict[str, Any] | None = None,
     ) -> TtsAudioType:
         """Retrieve the cached audio response from hass.data."""
-        entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
-        audio = entry_data[GEMINI_TURN_STORE_KEY].take_audio(message)
+        entry_data = self.hass.data[self.integration_domain][self.entry.entry_id]
+        audio = entry_data[self.turn_store_key].take_audio(message)
         _LOGGER.warning(
             "TTS: async_get_tts_audio called | message=%r | matched_audio=%s",
             message[:80] if message else "(none)",
@@ -93,9 +107,9 @@ class GeminiLiveTTS(TextToSpeechEntity):
         self,
         request: TTSAudioRequest,
     ) -> TTSAudioResponse:
-        """Stream Gemini's native audio response as it arrives."""
-        entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
-        turn_store = entry_data[GEMINI_TURN_STORE_KEY]
+        """Stream the live model's native audio response as it arrives."""
+        entry_data = self.hass.data[self.integration_domain][self.entry.entry_id]
+        turn_store = entry_data[self.turn_store_key]
         try:
             initial_text = await anext(request.message_gen)
         except StopAsyncIteration:
@@ -140,3 +154,9 @@ class GeminiLiveTTS(TextToSpeechEntity):
         # 16000 samples/sec * 2 bytes/sample * 1 sec = 32000 bytes of zero
         pcm_data = b"\x00" * 32000
         return pcm_to_wav(pcm_data, 16000)
+
+
+class GPTRealtimeTTS(GeminiLiveTTS):
+    """Play native audio produced by the GPT Realtime turn."""
+
+    integration_name = "GPT Realtime"

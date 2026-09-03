@@ -1,4 +1,4 @@
-"""Conversation platform for Gemini Live."""
+"""Shared conversation platform for realtime model providers."""
 
 import asyncio
 import logging
@@ -6,31 +6,37 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from google import genai
-from google.genai import types
 from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import chat_session, llm
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.intent import IntentResponse
 
+from .gemini import GeminiLiveClient, async_create_gemini_client
+from .live import LiveConfig, LiveTool, LiveToolResponse
 from .const import (
     CONF_API_KEY,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
+    CONF_PROVIDER,
     CONF_SYSTEM_INSTRUCTION,
     CONF_TRANSCRIBE_GEMINI,
+    CONF_TRANSCRIBE_GPT,
     CONF_SHOW_TEXT,
     CONF_VOICE,
     DEFAULT_SYSTEM_INSTRUCTION,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_TRANSCRIBE_GEMINI,
+    DEFAULT_TRANSCRIBE_GPT,
     DEFAULT_SHOW_TEXT,
     DOMAIN,
     GEMINI_LIVE_TTS_PLACEHOLDER,
     GEMINI_SESSION_MANAGER_KEY,
     GEMINI_TURN_STORE_KEY,
+    PROVIDER_GEMINI,
+    PROVIDER_OPENAI,
     SUPPORTED_LANGUAGES,
 )
 from .stt import (
@@ -38,48 +44,68 @@ from .stt import (
     _add_end_conversation_instruction,
     _add_end_conversation_tool,
     _add_search_tool_instruction,
-    _escape_decode,
-    _format_tools_for_gemini_live,
+    _format_tools_for_live,
     _is_connection_closed_ok,
     _validate_tool_results,
     SHOW_TEXT_TOOL_NAME,
     _add_show_text_instruction,
     _add_show_text_tool,
 )
+from .openai import OpenAIRealtimeClient
 from .runtime import AudioStream, new_conversation_id
 from .utils import pcm_to_wav, resample_24k_to_16k
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _ensure_unique_tts_placeholder(assistant_text: str) -> str:
-    """Make the streaming placeholder unique so HA cannot reuse cached audio."""
-    if assistant_text == GEMINI_LIVE_TTS_PLACEHOLDER:
-        return f"{GEMINI_LIVE_TTS_PLACEHOLDER} {uuid4().hex[:8]}"
-    return assistant_text
-
 
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Gemini Live Conversation platform."""
-    async_add_entities([GeminiLiveConversationAgent(hass, config_entry)])
+    """Set up the selected realtime provider's conversation platform."""
+    config = {**config_entry.data, **config_entry.options}
+    provider = config.get(CONF_PROVIDER, PROVIDER_GEMINI)
+    entity_class = (
+        GPTRealtimeConversationAgent
+        if provider == PROVIDER_OPENAI
+        else GeminiLiveConversationAgent
+    )
+    async_add_entities([entity_class(hass, config_entry)])
 
 
-class GeminiLiveConversationAgent(conversation.ConversationEntity):
-    """Gemini Live conversation entity."""
+class LiveModelConversationAgent(conversation.ConversationEntity):
+    """Shared conversation pipeline for realtime model providers."""
 
     _attr_supported_features = conversation.ConversationEntityFeature.CONTROL
     _attr_supports_streaming = True
+    integration_domain = DOMAIN
+    integration_name = "Live Model"
+    conversation_event = "live_model_conversation_entry"
+    session_manager_key = GEMINI_SESSION_MANAGER_KEY
+    turn_store_key = GEMINI_TURN_STORE_KEY
+    tts_placeholder = GEMINI_LIVE_TTS_PLACEHOLDER
+    transcribe_config_key = "transcribe_output"
+    default_transcribe = True
+    default_system_instruction = DEFAULT_SYSTEM_INSTRUCTION
+    error_response = "Sorry, I could not get a response from the live model."
+    supported_language_codes = SUPPORTED_LANGUAGES
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the agent."""
         self.hass = hass
         self.entry = entry
-        self._name = "Gemini Live"
+        self._name = self.integration_name
         self._unique_id = f"{entry.entry_id}_conversation"
+
+    async def _async_create_client(self, api_key: str) -> Any:
+        """Create the selected provider adapter."""
+        raise NotImplementedError
+
+    def _ensure_unique_tts_placeholder(self, assistant_text: str) -> str:
+        """Make the placeholder unique so Home Assistant cannot cache a prior turn."""
+        if assistant_text == self.tts_placeholder:
+            return f"{self.tts_placeholder} {uuid4().hex[:8]}"
+        return assistant_text
 
     @property
     def name(self) -> str:
@@ -99,7 +125,7 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
     @property
     def supported_languages(self) -> list[str] | str:
         """Return supported languages."""
-        return SUPPORTED_LANGUAGES
+        return self.supported_language_codes
 
     def _fire_conversation_entry(
         self,
@@ -108,7 +134,7 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
     ) -> None:
         """Fire the text event used by automations and dashboards."""
         self.hass.bus.async_fire(
-            "gemini_live_conversation_entry",
+            self.conversation_event,
             {
                 "user_transcript": user_transcript,
                 "assistant_text": assistant_text,
@@ -123,20 +149,20 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
     async def _async_get_llm_api(
         self,
         llm_context: llm.LLMContext,
-    ) -> tuple[llm.APIInstance | None, list[dict[str, Any]], str]:
-        """Load HA Assist tools and the final Gemini system instruction."""
+    ) -> tuple[llm.APIInstance | None, list[LiveTool], str]:
+        """Load HA Assist tools and the final live-model instruction."""
         config = {**self.entry.data, **self.entry.options}
         custom_instruction = config.get(CONF_SYSTEM_INSTRUCTION, "")
         encourage_web_search = bool(
             config.get(CONF_ENCOURAGE_WEB_SEARCH, DEFAULT_ENCOURAGE_WEB_SEARCH)
         )
-        transcribe_gemini = bool(
-            config.get(CONF_TRANSCRIBE_GEMINI, DEFAULT_TRANSCRIBE_GEMINI)
+        transcribe_output = bool(
+            config.get(self.transcribe_config_key, self.default_transcribe)
         )
         show_text = bool(
             config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT)
         )
-        system_instruction = custom_instruction or DEFAULT_SYSTEM_INSTRUCTION
+        system_instruction = custom_instruction or self.default_system_instruction
 
         try:
             llm_api = await llm.async_get_api(
@@ -148,44 +174,46 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
             if custom_instruction:
                 system_instruction = f"{custom_instruction}\n\n{api_prompt}"
             else:
-                system_instruction = DEFAULT_SYSTEM_INSTRUCTION + "\n\n" + api_prompt
+                system_instruction = (
+                    self.default_system_instruction + "\n\n" + api_prompt
+                )
             system_instruction = _add_search_tool_instruction(
                 system_instruction,
                 llm_api.tools,
                 encourage_web_search,
             )
             system_instruction = _add_end_conversation_instruction(system_instruction)
-            if not transcribe_gemini and show_text:
+            if not transcribe_output and show_text:
                 system_instruction = _add_show_text_instruction(system_instruction)
 
-            gemini_tools = _add_end_conversation_tool(
-                _format_tools_for_gemini_live(
+            live_tools = _add_end_conversation_tool(
+                _format_tools_for_live(
                     llm_api.tools,
                     llm_api.custom_serializer,
                     encourage_web_search,
                 )
             )
-            if not transcribe_gemini and show_text:
-                gemini_tools = _add_show_text_tool(gemini_tools)
+            if not transcribe_output and show_text:
+                live_tools = _add_show_text_tool(live_tools)
 
             _LOGGER.debug(
                 "Conversation text path loaded %d HA Assist tools",
-                len(gemini_tools),
+                len(live_tools),
             )
-            return llm_api, gemini_tools, system_instruction
+            return llm_api, live_tools, system_instruction
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning(
                 "Could not load HA Assist LLM API for text path: %s. Tools will be unavailable.",
                 exc,
             )
-            gemini_tools = _add_end_conversation_tool([])
+            live_tools = _add_end_conversation_tool([])
             system_instruction = _add_end_conversation_instruction(system_instruction)
-            if not transcribe_gemini and show_text:
+            if not transcribe_output and show_text:
                 system_instruction = _add_show_text_instruction(system_instruction)
-                gemini_tools = _add_show_text_tool(gemini_tools)
+                live_tools = _add_show_text_tool(live_tools)
             return (
                 None,
-                gemini_tools,
+                live_tools,
                 system_instruction,
             )
 
@@ -195,7 +223,7 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
         user_input: conversation.ConversationInput,
         conversation_id: str,
     ) -> str | None:
-        """Send typed text to Gemini Live and cache the returned audio for TTS."""
+        """Send typed text to the live model and cache its audio for TTS."""
         turn_id = uuid4().hex[:8]
         show_text_content: str | None = None
         started_at = time.monotonic()
@@ -204,40 +232,31 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
         model = config.get(CONF_MODEL)
         voice = config.get(CONF_VOICE)
         language = user_input.language or "en"
-        transcribe_gemini = bool(
-            config.get(CONF_TRANSCRIBE_GEMINI, DEFAULT_TRANSCRIBE_GEMINI)
+        transcribe_output = bool(
+            config.get(self.transcribe_config_key, self.default_transcribe)
         )
         show_text = bool(
             config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT)
         )
 
         if not api_key:
-            _LOGGER.error("API Key not configured for Gemini Live")
+            _LOGGER.error("API key not configured for %s", self.integration_name)
             return None
 
-        llm_api, gemini_tools, system_instruction = await self._async_get_llm_api(
-            user_input.as_llm_context(DOMAIN)
+        llm_api, live_tools, system_instruction = await self._async_get_llm_api(
+            user_input.as_llm_context(self.integration_domain)
         )
-        entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
-        session_manager = entry_data[GEMINI_SESSION_MANAGER_KEY]
-        turn_store = entry_data[GEMINI_TURN_STORE_KEY]
+        entry_data = self.hass.data[self.integration_domain][self.entry.entry_id]
+        session_manager = entry_data[self.session_manager_key]
+        turn_store = entry_data[self.turn_store_key]
 
-        live_config: dict[str, Any] = {
-            "response_modalities": ["AUDIO"],
-            "speech_config": {
-                "voice_config": {
-                    "prebuilt_voice_config": {"voice_name": voice}
-                }
-            },
-            "system_instruction": {"parts": [{"text": system_instruction}]},
-            "input_audio_transcription": {},
-            "output_audio_transcription": {},
-            "realtime_input_config": {
-                "turn_coverage": "TURN_INCLUDES_ONLY_ACTIVITY"
-            },
-        }
-        if gemini_tools:
-            live_config["tools"] = gemini_tools
+        live_config = LiveConfig(
+            model=model,
+            voice=voice,
+            system_instruction=system_instruction,
+            tools=live_tools,
+            transcribe_output=True,
+        )
 
         text_response_parts: list[str] = []
         audio_response_chunks: list[bytes] = []
@@ -250,31 +269,28 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
             turn_id,
             model,
             voice,
-            len(gemini_tools),
+            len(live_tools),
             user_text[:120],
         )
 
-        client = await self.hass.async_add_executor_job(
-            lambda: genai.Client(api_key=api_key)
-        )
+        client = await self._async_create_client(api_key)
 
         try:
             async with session_manager.acquire(
                 conversation_id,
                 client,
-                model,
                 live_config,
             ) as session:
-                await session.send_realtime_input(text=user_text)
+                await session.send_text(user_text)
 
                 async with asyncio.timeout(30):
                     async for response in session.receive():
-                        if response.tool_call:
+                        if response.tool_calls:
                             function_responses = []
-                            for call in response.tool_call.function_calls or []:
+                            for call in response.tool_calls:
                                 tool_name = call.name or ""
-                                tool_args = _escape_decode(call.args or {})
-                                call_id = call.id
+                                tool_args = call.arguments
+                                call_id = call.call_id
                                 _LOGGER.debug(
                                     "[turn=%s] LLM tool call name=%s id=%s arguments=%r",
                                     turn_id,
@@ -321,41 +337,27 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                                 )
 
                                 function_responses.append(
-                                    types.FunctionResponse(
-                                        name=tool_name,
-                                        id=call_id,
-                                        response=tool_result,
-                                    )
+                                    LiveToolResponse(tool_name, call_id, tool_result)
                                 )
 
                             if function_responses:
-                                await session.send_tool_response(
-                                    function_responses=function_responses
-                                )
+                                await session.send_tool_responses(function_responses)
 
-                        content = response.server_content
-                        if not content:
-                            continue
+                        if response.text:
+                            text_response_parts.append(response.text)
+                        if response.audio:
+                            audio_response_chunks.append(response.audio)
+                            resampled_pcm_chunks.append(
+                                resample_24k_to_16k(response.audio)
+                            )
+                            wav_data = pcm_to_wav(
+                                b"".join(resampled_pcm_chunks),
+                                16000,
+                            )
+                        if response.output_transcript:
+                            text_response_parts.append(response.output_transcript)
 
-                        if content.model_turn:
-                            for part in content.model_turn.parts or []:
-                                if part.text:
-                                    text_response_parts.append(part.text)
-                                if part.inline_data and part.inline_data.data:
-                                    raw_chunk = part.inline_data.data
-                                    audio_response_chunks.append(raw_chunk)
-                                    resampled_pcm_chunks.append(
-                                        resample_24k_to_16k(raw_chunk)
-                                    )
-                                    wav_data = pcm_to_wav(
-                                        b"".join(resampled_pcm_chunks),
-                                        16000,
-                                    )
-
-                        if content.output_transcription and content.output_transcription.text:
-                            text_response_parts.append(content.output_transcription.text)
-
-                        if content.turn_complete:
+                        if response.turn_complete:
                             if native_audio_model and not audio_response_chunks:
                                 _LOGGER.warning(
                                     "[turn=%s] text path turnComplete before audio; waiting",
@@ -364,29 +366,31 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                                 continue
                             break
         except TimeoutError:
-            _LOGGER.error("[turn=%s] Gemini Live text path timed out", turn_id)
+            _LOGGER.error("[turn=%s] %s text path timed out", turn_id, self.integration_name)
             return None
         except Exception as exc:  # noqa: BLE001
             if _is_connection_closed_ok(exc):
                 _LOGGER.warning(
-                    "[turn=%s] Gemini Live text path websocket closed normally",
+                    "[turn=%s] %s text path connection closed normally",
                     turn_id,
+                    self.integration_name,
                 )
             else:
                 _LOGGER.exception(
-                    "[turn=%s] error in Gemini Live text path: %s",
+                    "[turn=%s] error in %s text path: %s",
                     turn_id,
+                    self.integration_name,
                     exc,
                 )
                 return None
 
-        if not transcribe_gemini and show_text and show_text_content is not None:
+        if not transcribe_output and show_text and show_text_content is not None:
             assistant_text = show_text_content
         else:
             assistant_text = "".join(text_response_parts)
 
         if not assistant_text:
-            _LOGGER.error("[turn=%s] Gemini text path returned no usable text", turn_id)
+            _LOGGER.error("[turn=%s] live-model text path returned no usable text", turn_id)
             return None
 
         turn_store.add_audio(assistant_text, wav_data)
@@ -407,8 +411,8 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
         chat_log: conversation.ChatLog,
     ) -> conversation.ConversationResult:
         """Process voice pass-through responses and typed text input."""
-        entry_data = self.hass.data[DOMAIN][self.entry.entry_id]
-        turn_store = entry_data[GEMINI_TURN_STORE_KEY]
+        entry_data = self.hass.data[self.integration_domain][self.entry.entry_id]
+        turn_store = entry_data[self.turn_store_key]
         language = user_input.language or "en"
         input_text = user_input.text or ""
         current_chat_session = chat_session.current_session.get()
@@ -417,7 +421,7 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
             if current_chat_session is not None
             else user_input.conversation_id
         ) or new_conversation_id()
-        session_manager = entry_data[GEMINI_SESSION_MANAGER_KEY]
+        session_manager = entry_data[self.session_manager_key]
         if current_chat_session is not None:
             session_manager.register_chat_session(self.hass, current_chat_session)
 
@@ -428,7 +432,7 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
             if voice_turn.complete_conversation:
                 session_manager.complete_conversation(conversation_id)
             user_transcript = input_text
-            fallback_assistant_text = _ensure_unique_tts_placeholder(
+            fallback_assistant_text = self._ensure_unique_tts_placeholder(
                 voice_turn.assistant_text
             )
             if voice_turn.assistant_text_stream is not None:
@@ -440,7 +444,7 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                 )
 
                 async def transcript_deltas():
-                    """Yield Gemini's response transcript into Home Assistant."""
+                    """Yield the live model's response transcript into Home Assistant."""
                     yield {"role": "assistant"}
                     received_text = False
                     async for chunk in voice_turn.assistant_text_stream.async_chunks():
@@ -473,7 +477,7 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                 input_text,
                 user_input,
                 conversation_id,
-            ) or "Sorry, I could not get a response from Gemini Live."
+            ) or self.error_response
             chat_log.async_add_assistant_content_without_tools(
                 conversation.AssistantContent(
                     agent_id=self.entity_id,
@@ -493,3 +497,32 @@ class GeminiLiveConversationAgent(conversation.ConversationEntity):
                 session_manager.should_continue_conversation(conversation_id)
             ),
         )
+
+
+class GeminiLiveConversationAgent(LiveModelConversationAgent):
+    """Handle pipeline handoffs through a Gemini Live session."""
+
+    integration_name = "Gemini Live"
+    conversation_event = "gemini_live_conversation_entry"
+    transcribe_config_key = CONF_TRANSCRIBE_GEMINI
+    default_transcribe = DEFAULT_TRANSCRIBE_GEMINI
+    error_response = "Sorry, I could not get a response from Gemini Live."
+
+    async def _async_create_client(self, api_key: str) -> GeminiLiveClient:
+        """Create the Gemini provider adapter."""
+        return await async_create_gemini_client(self.hass, api_key)
+
+
+class GPTRealtimeConversationAgent(LiveModelConversationAgent):
+    """Handle pipeline handoffs through an OpenAI Realtime session."""
+
+    integration_name = "GPT Realtime"
+    conversation_event = "gpt_realtime_conversation_entry"
+    tts_placeholder = "-- gpt realtime --"
+    transcribe_config_key = CONF_TRANSCRIBE_GPT
+    default_transcribe = DEFAULT_TRANSCRIBE_GPT
+    error_response = "Sorry, I could not get a response from GPT Realtime."
+
+    async def _async_create_client(self, api_key: str) -> OpenAIRealtimeClient:
+        """Create an OpenAI Realtime WebSocket client."""
+        return OpenAIRealtimeClient(async_get_clientsession(self.hass), api_key)

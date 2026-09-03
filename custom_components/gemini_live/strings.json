@@ -3,69 +3,73 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to Gemini Live",
-        "description": "Enter a Google Gemini API key and choose how Gemini Live should respond.",
+        "title": "Choose a live model provider",
+        "description": "Use either Google Gemini Live or OpenAI GPT Realtime with the Home Assistant voice pipeline.",
         "data": {
-          "api_key": "Gemini API key",
+          "provider": "Provider"
+        }
+      },
+      "provider": {
+        "title": "Connect to {provider}",
+        "description": "Enter the provider API key and choose how the live model should respond.",
+        "data": {
+          "api_key": "API key",
           "model": "Live model",
           "voice": "Voice",
           "system_instruction": "System instruction",
           "detailed_logging": "Enable detailed logging",
           "transcribe_gemini": "Transcribe Gemini",
+          "transcribe_gpt": "Transcribe GPT",
           "encourage_web_search": "Encourage web search",
           "show_text": "Show text"
         },
         "data_description": {
-          "api_key": "Create an API key in Google AI Studio. Audio and text sent through this integration are processed by Google.",
-          "model": "Preview Gemini Live model used for voice and text conversations.",
-          "voice": "Prebuilt voice used for Gemini's spoken replies.",
+          "api_key": "Audio, text, Home Assistant tool schemas, and tool results are sent to the selected provider.",
+          "model": "Realtime audio model used for voice and typed conversations.",
+          "voice": "Built-in voice used for spoken replies.",
           "system_instruction": "Optional custom personality and behavior. Home Assistant's Assist tool instructions are appended automatically.",
-          "detailed_logging": "Write verbose diagnostic information to the Home Assistant log. Enable only while troubleshooting.",
-          "transcribe_gemini": "Stream a transcript of Gemini's spoken reply into Home Assistant. Disabling this gives the lowest reply-audio latency.",
-          "encourage_web_search": "Tell Gemini to use an exposed search-like Assist tool for current, recent, time-sensitive, or explicitly requested online information.",
-          "show_text": "Expose show_text tool to allow Gemini to display formatted text to the user when transcription is OFF."
+          "detailed_logging": "Write transcripts, model details, and tool calls to the Home Assistant log. Enable only while troubleshooting.",
+          "transcribe_gemini": "Stream Gemini's spoken-response transcript into Home Assistant. Disabling this gives the lowest reply-audio latency.",
+          "transcribe_gpt": "Stream GPT's spoken-response transcript into Home Assistant. Disabling this gives the lowest reply-audio latency.",
+          "encourage_web_search": "Tell the model to use an exposed search-like Assist tool for current or explicitly requested online information.",
+          "show_text": "Expose show_text so the model can display formatted text when response transcription is off."
         }
       },
       "reconfigure": {
-        "title": "Reconfigure Gemini Live",
-        "description": "Update the connection and response settings.",
+        "title": "Reconfigure live model",
+        "description": "Update the provider connection and response settings.",
         "data": {
-          "api_key": "Gemini API key",
+          "api_key": "API key",
           "model": "Live model",
           "voice": "Voice",
           "system_instruction": "System instruction",
           "detailed_logging": "Enable detailed logging",
           "transcribe_gemini": "Transcribe Gemini",
+          "transcribe_gpt": "Transcribe GPT",
           "encourage_web_search": "Encourage web search",
           "show_text": "Show text"
-        },
-        "data_description": {
-          "transcribe_gemini": "Stream a transcript of Gemini's spoken reply into Home Assistant. Disabling this gives the lowest reply-audio latency.",
-          "encourage_web_search": "Tell Gemini to use an exposed search-like Assist tool for current, recent, time-sensitive, or explicitly requested online information.",
-          "show_text": "Expose show_text tool to allow Gemini to display formatted text to the user when transcription is OFF."
         }
       }
+    },
+    "abort": {
+      "reconfigure_successful": "The live model was reconfigured successfully."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Gemini Live options",
-        "description": "Update the connection and response settings.",
+        "title": "Live model options",
+        "description": "Update the provider connection and response settings.",
         "data": {
-          "api_key": "Gemini API key",
+          "api_key": "API key",
           "model": "Live model",
           "voice": "Voice",
           "system_instruction": "System instruction",
           "detailed_logging": "Enable detailed logging",
           "transcribe_gemini": "Transcribe Gemini",
+          "transcribe_gpt": "Transcribe GPT",
           "encourage_web_search": "Encourage web search",
           "show_text": "Show text"
-        },
-        "data_description": {
-          "transcribe_gemini": "Stream a transcript of Gemini's spoken reply into Home Assistant. Disabling this gives the lowest reply-audio latency.",
-          "encourage_web_search": "Tell Gemini to use an exposed search-like Assist tool for current, recent, time-sensitive, or explicitly requested online information.",
-          "show_text": "Expose show_text tool to allow Gemini to display formatted text to the user when transcription is OFF."
         }
       }
     }

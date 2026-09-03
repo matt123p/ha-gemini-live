@@ -1,27 +1,27 @@
-# Gemini Live for Home Assistant
+# Gemini Live and GPT Realtime for Home Assistant
 
 [![HACS validation](https://img.shields.io/github/actions/workflow/status/matt123p/ha-gemini-live/validate.yml?branch=main&label=HACS%20validation)](https://github.com/matt123p/ha-gemini-live/actions/workflows/validate.yml)
 [![GitHub release](https://img.shields.io/github/v/release/matt123p/ha-gemini-live)](https://github.com/matt123p/ha-gemini-live/releases)
 [![License](https://img.shields.io/github/license/matt123p/ha-gemini-live)](LICENSE)
 
-Gemini Live is a custom Home Assistant integration that connects the Home Assistant voice
-pipeline directly to Google's Gemini Live API. 
+This custom Home Assistant integration connects the Home Assistant voice pipeline
+directly to either Google's Gemini Live API or OpenAI's Realtime API.
 
 Doing this has the advantage of reducing the time it takes to reply because the 
 Speech-to-text and the Text-to-speech are done natively by the Live model.
 
-It streams microphone audio to Gemini, lets Gemini call Home Assistant's exposed 
-Assist tools, and plays Gemini's native spoken response back through the pipeline. This 
-bypasses the need for Speech-To-Text (STT) and Text to Speech (TTS) and lets the Gemini 
-LLM do both these operations internally.
+It streams microphone audio to the selected provider, lets the model call Home
+Assistant's exposed Assist tools, and plays the native spoken response back through
+the pipeline. This bypasses separate Speech-To-Text (STT) and Text-to-Speech (TTS)
+cloud calls.
 
-**NOTE:** Gemini transcribes the user's speech but by default not Gemini's reply. Transcribing 
-Gemini's reply to text is optional and will slow down the time it takes to reply.
+**NOTE:** The model transcribes the user's speech, but response transcription is
+optional. Enabling it can delay the start of playback in Home Assistant.
 
 > [!IMPORTANT]
 > This is an independent community integration. It is not the official Home
 > Assistant Google Gemini integration and is not affiliated with Google, Google
-> DeepMind, or the Open Home Foundation.
+> DeepMind, OpenAI, or the Open Home Foundation.
 
 
 ## How It Works
@@ -32,26 +32,31 @@ A normal Assist pipeline has three separate stages:
 2. A conversation agent handles the text and returns response text.
 3. Text-to-speech synthesizes that response for playback.
 
-Gemini Live deliberately bends that arrangement:
+The integration deliberately bends that arrangement:
 
-1. The Gemini Live STT entity doesn't perform Speech-to-text but instead streams 
-   the microphone audio to Gemini.
-2. In the same Live turn, Gemini transcribes the user, calls any required Home
+1. The selected live STT entity doesn't perform Speech-to-text but instead streams
+   the microphone audio to Gemini or OpenAI.
+2. In the same live turn, the model transcribes the user, calls any required Home
    Assistant Assist tools, and starts producing native audio.
-3. The conversation entity passes back dummy text `-- gemini live -- <turn-id>` 
-   placeholder through Home Assistant. The unique ID prevents Home Assistant's 
+3. The conversation entity passes a provider-specific, per-turn placeholder through
+   Home Assistant. The unique ID prevents Home Assistant's
    persistent TTS cache from replaying audio from an earlier turn.
-4. The Gemini Live TTS entity doesn't actually perform Text-to-speech but instead
-   streams the native audio directly from Gemini Live.
+4. The matching TTS entity doesn't actually perform Text-to-speech but instead
+   streams the native audio directly from the live model.
 
 This design avoids sending the request through separate STT, LLM, and TTS cloud
 calls.
 
-Gemini Live connections are kept open per Home Assistant conversation ID.
+Live connections are kept open per Home Assistant conversation ID.
 Follow-up turns in the same conversation reuse the existing Live session, while
 a new conversation receives a separate session. Home Assistant expires inactive
 conversation sessions after its configured chat-session timeout, at which point
 the matching Live connection is closed.
+
+The shared pipeline talks to a provider-neutral live session contract. Google
+Gemini SDK details live in `gemini.py`, while OpenAI Realtime WebSocket details
+live in `openai.py`; neither provider's event or configuration format leaks into
+the shared STT, conversation, or session-manager code.
 
 ## Difference From The Official Gemini Integration
 
@@ -101,10 +106,12 @@ Before installing, you need:
 - [HACS](https://www.hacs.xyz/) for the recommended installation method.
 - A Google Gemini API key created in
   [Google AI Studio](https://aistudio.google.com/app/apikey).
-- Gemini Live API access in the region and account associated with the key.
+- Gemini Live API access in the region and account associated with the key; or
+  an OpenAI API key with Realtime API access from the
+  [OpenAI platform](https://platform.openai.com/api-keys).
 - An Assist-capable voice device, browser, or companion app if you want to use
   voice input and playback.
-- Entities and scripts exposed to Assist if you want Gemini to control them.
+- Entities and scripts exposed to Assist if you want the model to control them.
 
 Review Google's current
 [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing),
@@ -161,8 +168,8 @@ upgrade to the latest version.
 1. In Home Assistant, open **Settings > Devices & services**.
 2. Select **Add integration**.
 3. Search for **Gemini Live**.
-4. Enter your Gemini API key.
-5. Select a Live model and voice.
+4. Select Google Gemini or OpenAI as the provider.
+5. Enter that provider's API key and select a Realtime model and voice.
 6. Optionally enter a system instruction.
 7. Leave detailed logging disabled unless you are diagnosing a problem.
 8. Select **Submit**.
@@ -171,34 +178,35 @@ upgrade to the latest version.
 
 | Option | Description |
 | --- | --- |
-| API key | Google Gemini API key used for every Live connection. |
-| Live model | Preview Live model used for voice and typed conversations. |
-| Voice | Prebuilt voice used for Gemini's native audio responses. |
+| Provider | Google Gemini Live or OpenAI GPT Realtime. Existing entries default to Gemini. |
+| API key | API key for the selected provider, used for every live connection. |
+| Live model | Provider-specific Realtime model used for voice and typed conversations. |
+| Voice | Provider-specific built-in voice used for native audio responses. |
 | System instruction | Optional personality and behavior instruction. Home Assistant's Assist API prompt is appended automatically. |
 | Detailed logging | Enables verbose logs from this custom integration. These logs can contain transcripts, model details, and tool-call information. |
-| Transcribe Gemini | Streams Gemini's spoken-response transcript into Home Assistant while native audio is still arriving. Disabled by default for the lowest playback latency. |
-| Encourage web search | Encourages Gemini to use an exposed search-like Assist tool for current, recent, time-sensitive, or explicitly requested online information. Disabled by default. |
-| Show text | Exposes a callback function to let Gemini display formatted text/markdown in the Home Assistant chat UI (e.g. lists, instructions, code) instead of the default placeholder. Only active when "Transcribe Gemini" is disabled. Enabled by default. |
+| Transcribe Gemini / GPT | Streams the model's spoken-response transcript into Home Assistant while native audio is still arriving. Disabled by default for the lowest playback latency. |
+| Encourage web search | Encourages the model to use an exposed search-like Assist tool for current, recent, time-sensitive, or explicitly requested online information. Disabled by default. |
+| Show text | Exposes a callback function so the model can display formatted text/markdown in the Home Assistant chat UI instead of the default placeholder. Only active when response transcription is disabled. Enabled by default. |
 
 To change the options later, open **Settings > Devices & services**, select
 **Gemini Live**, and select **Configure** or **Reconfigure**.
 
 ## Create An Assist Pipeline
 
-The integration creates three entities:
+Each config entry creates three matching provider entities:
 
-- A Gemini Live speech-to-text entity.
-- A Gemini Live conversation agent.
-- A Gemini Live text-to-speech entity.
+- A speech-to-text bridge.
+- A conversation agent.
+- A text-to-speech bridge.
 
 Use all three together in the same pipeline:
 
 1. Open **Settings > Voice assistants**.
 2. Create a new assistant, or edit a dedicated experimental assistant.
-3. Set **Conversation agent** to **Gemini Live**.
+3. Set **Conversation agent** to the configured **Gemini Live** or **GPT Realtime** entity.
 4. Turn **off** Prefer handling commands locally.
-5. Set **Speech-to-text** to **Gemini Live**, the language doesn't matter as this is handled by Gemini
-6. Set **Text-to-speech** to **Gemini Live**, the language doesn't matter as this is handled by Gemini
+5. Select the matching provider entry for **Speech-to-text**.
+6. Select the matching provider entry for **Text-to-speech**.
 7. Save the assistant and test it from the Assist dialog before assigning it to
    voice hardware.
 
@@ -206,9 +214,9 @@ Although mixing the Gemini Live conversation agent with other Speech-to-text or 
 just work, it isn't a good idea because the point of using Gemini live is to get the native voice from Gemini
 directly.
 
-## Give Gemini Access To Home Assistant
+## Give The Model Access To Home Assistant
 
-Gemini can only control or inspect what Home Assistant exposes through Assist.
+The selected model can only control or inspect what Home Assistant exposes through Assist.
 Keep the exposed set as small as practical.
 
 1. Open **Settings > Voice assistants**.
@@ -307,8 +315,8 @@ as a Home Assistant compatibility alias for English. See Google's current
 ## Privacy And Security
 
 - This is a cloud integration. Audio and text leave your Home Assistant
-  instance.
-- The Gemini API key is stored in the Home Assistant config entry.
+  instance and are sent to the provider selected for that entry.
+- The provider API key is stored in the Home Assistant config entry.
 - Home Assistant entity names, tool schemas, and tool results may be sent to
   Google when Assist control is available.
 - Detailed logs can contain transcripts and tool-call details. Disable detailed

@@ -1,4 +1,4 @@
-"""The Gemini Live integration."""
+"""Live voice-model integration for Gemini and OpenAI."""
 
 import logging
 from homeassistant.config_entries import ConfigEntry
@@ -17,7 +17,7 @@ from .utils import set_detailed_logging
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Gemini Live from a config entry."""
+    """Set up a live voice-model provider from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
     config = {**entry.data, **entry.options}
@@ -51,5 +51,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update by reloading the entry."""
-    _LOGGER.debug("Gemini Live entry updated, reloading")
+    _LOGGER.debug("Live model entry updated, reloading")
     await hass.config_entries.async_reload(entry.entry_id)

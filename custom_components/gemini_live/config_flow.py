@@ -1,4 +1,6 @@
-"""Config flow for Gemini Live integration."""
+"""Config flow for live voice-model providers."""
+
+from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
@@ -6,135 +8,198 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
-    DOMAIN,
+    AVAILABLE_MODELS,
+    AVAILABLE_VOICES_INFO,
     CONF_API_KEY,
     CONF_DETAILED_LOGGING,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
+    CONF_PROVIDER,
     CONF_SHOW_TEXT,
-    CONF_TRANSCRIBE_GEMINI,
-    CONF_VOICE,
-    DEFAULT_TRANSCRIBE_GEMINI,
-    DEFAULT_ENCOURAGE_WEB_SEARCH,
-    DEFAULT_SHOW_TEXT,
     CONF_SYSTEM_INSTRUCTION,
+    CONF_TRANSCRIBE_GEMINI,
+    CONF_TRANSCRIBE_GPT,
+    CONF_VOICE,
+    DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_MODEL,
+    DEFAULT_SHOW_TEXT,
+    DEFAULT_TRANSCRIBE_GEMINI,
+    DEFAULT_TRANSCRIBE_GPT,
     DEFAULT_VOICE,
-    AVAILABLE_MODELS,
-    AVAILABLE_VOICES_INFO,
+    DOMAIN,
+    OPENAI_AVAILABLE_MODELS,
+    OPENAI_AVAILABLE_VOICES_INFO,
+    OPENAI_DEFAULT_MODEL,
+    OPENAI_DEFAULT_VOICE,
+    PROVIDER_GEMINI,
+    PROVIDER_OPENAI,
 )
 
-
-VOICE_OPTIONS = [
-    selector.SelectOptionDict(
-        value=name,
-        label=f"{name} - {gender}, {description}",
-    )
-    for name, gender, description in AVAILABLE_VOICES_INFO
-]
-
-VOICE_SELECTOR = selector.SelectSelector(
+PROVIDER_SELECTOR = selector.SelectSelector(
     selector.SelectSelectorConfig(
-        options=VOICE_OPTIONS,
+        options=[
+            selector.SelectOptionDict(value=PROVIDER_GEMINI, label="Google Gemini"),
+            selector.SelectOptionDict(value=PROVIDER_OPENAI, label="OpenAI"),
+        ],
+        mode=selector.SelectSelectorMode.DROPDOWN,
+    )
+)
+
+GEMINI_VOICE_SELECTOR = selector.SelectSelector(
+    selector.SelectSelectorConfig(
+        options=[
+            selector.SelectOptionDict(
+                value=name,
+                label=f"{name} - {gender}, {description}",
+            )
+            for name, gender, description in AVAILABLE_VOICES_INFO
+        ],
+        mode=selector.SelectSelectorMode.DROPDOWN,
+    )
+)
+
+OPENAI_VOICE_SELECTOR = selector.SelectSelector(
+    selector.SelectSelectorConfig(
+        options=[
+            selector.SelectOptionDict(value=name, label=f"{name} - {description}")
+            for name, description in OPENAI_AVAILABLE_VOICES_INFO
+        ],
         mode=selector.SelectSelectorMode.DROPDOWN,
     )
 )
 
 
+def _provider(config: dict[str, Any]) -> str:
+    """Return the configured provider, defaulting legacy entries to Gemini."""
+    return config.get(CONF_PROVIDER, PROVIDER_GEMINI)
+
+
+def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol.Schema:
+    """Build a provider-specific setup/options schema."""
+    current = config or {}
+    is_openai = provider == PROVIDER_OPENAI
+    models = OPENAI_AVAILABLE_MODELS if is_openai else AVAILABLE_MODELS
+    default_model = OPENAI_DEFAULT_MODEL if is_openai else DEFAULT_MODEL
+    default_voice = OPENAI_DEFAULT_VOICE if is_openai else DEFAULT_VOICE
+    voice_selector = OPENAI_VOICE_SELECTOR if is_openai else GEMINI_VOICE_SELECTOR
+    transcribe_key = CONF_TRANSCRIBE_GPT if is_openai else CONF_TRANSCRIBE_GEMINI
+    default_transcribe = (
+        DEFAULT_TRANSCRIBE_GPT if is_openai else DEFAULT_TRANSCRIBE_GEMINI
+    )
+
+    api_key_field = (
+        vol.Required(CONF_API_KEY, default=current[CONF_API_KEY])
+        if CONF_API_KEY in current
+        else vol.Required(CONF_API_KEY)
+    )
+    fields: dict[vol.Marker, Any] = {
+        api_key_field: str,
+        vol.Required(
+            CONF_MODEL,
+            default=current.get(CONF_MODEL, default_model),
+        ): vol.In(models),
+        vol.Required(
+            CONF_VOICE,
+            default=current.get(CONF_VOICE, default_voice),
+        ): voice_selector,
+        vol.Optional(
+            CONF_SYSTEM_INSTRUCTION,
+            description={
+                "suggested_value": current.get(CONF_SYSTEM_INSTRUCTION, "")
+            },
+        ): str,
+        vol.Optional(
+            CONF_DETAILED_LOGGING,
+            default=current.get(CONF_DETAILED_LOGGING, False),
+        ): selector.BooleanSelector(),
+        vol.Optional(
+            transcribe_key,
+            default=current.get(transcribe_key, default_transcribe),
+        ): selector.BooleanSelector(),
+        vol.Optional(
+            CONF_ENCOURAGE_WEB_SEARCH,
+            default=current.get(
+                CONF_ENCOURAGE_WEB_SEARCH,
+                DEFAULT_ENCOURAGE_WEB_SEARCH,
+            ),
+        ): selector.BooleanSelector(),
+        vol.Optional(
+            CONF_SHOW_TEXT,
+            default=current.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT),
+        ): selector.BooleanSelector(),
+    }
+    return vol.Schema(fields)
+
+
 class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Gemini Live."""
+    """Configure a Gemini Live or GPT Realtime provider."""
 
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
-        """Handle the initial step."""
-        errors = {}
+        """Select the live model provider."""
         if user_input is not None:
-            user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
-            return self.async_create_entry(title="Gemini Live", data=user_input)
-
+            return await self.async_step_provider(
+                provider=user_input[CONF_PROVIDER]
+            )
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_API_KEY): str,
-                    vol.Required(CONF_MODEL, default=DEFAULT_MODEL): vol.In(AVAILABLE_MODELS),
-                    vol.Required(CONF_VOICE, default=DEFAULT_VOICE): VOICE_SELECTOR,
-                    vol.Optional(CONF_SYSTEM_INSTRUCTION): str,
-                    vol.Optional(CONF_DETAILED_LOGGING, default=False): selector.BooleanSelector(),
-                    vol.Optional(
-                        CONF_TRANSCRIBE_GEMINI,
-                        default=DEFAULT_TRANSCRIBE_GEMINI,
-                    ): selector.BooleanSelector(),
-                    vol.Optional(
-                        CONF_ENCOURAGE_WEB_SEARCH,
-                        default=DEFAULT_ENCOURAGE_WEB_SEARCH,
-                    ): selector.BooleanSelector(),
-                    vol.Optional(
-                        CONF_SHOW_TEXT,
-                        default=DEFAULT_SHOW_TEXT,
-                    ): selector.BooleanSelector(),
+                    vol.Required(
+                        CONF_PROVIDER,
+                        default=PROVIDER_GEMINI,
+                    ): PROVIDER_SELECTOR
                 }
             ),
-            errors=errors,
+        )
+
+    async def async_step_provider(
+        self,
+        user_input=None,
+        *,
+        provider: str | None = None,
+    ):
+        """Collect settings for the selected provider."""
+        selected_provider = provider or self.context[CONF_PROVIDER]
+        self.context[CONF_PROVIDER] = selected_provider
+        if user_input is not None:
+            user_input[CONF_PROVIDER] = selected_provider
+            user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
+            title = (
+                "GPT Realtime"
+                if selected_provider == PROVIDER_OPENAI
+                else "Gemini Live"
+            )
+            return self.async_create_entry(title=title, data=user_input)
+        return self.async_show_form(
+            step_id="provider",
+            data_schema=_provider_schema(selected_provider),
+            description_placeholders={
+                "provider": (
+                    "OpenAI"
+                    if selected_provider == PROVIDER_OPENAI
+                    else "Google Gemini"
+                )
+            },
         )
 
     async def async_step_reconfigure(self, user_input=None):
-        """Handle reconfiguration of the integration."""
-        errors = {}
+        """Reconfigure an existing provider entry."""
         entry = self._get_reconfigure_entry()
-
+        config = {**entry.data, **entry.options}
+        provider = _provider(config)
         if user_input is not None:
+            user_input[CONF_PROVIDER] = provider
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
             return self.async_update_reload_and_abort(
                 entry,
                 data_updates=user_input,
                 options={},
             )
-
-        config = {**entry.data, **entry.options}
-        current_api_key = config.get(CONF_API_KEY, "")
-        current_model = config.get(CONF_MODEL, DEFAULT_MODEL)
-        current_voice = config.get(CONF_VOICE, DEFAULT_VOICE)
-        current_system_instruction = config.get(CONF_SYSTEM_INSTRUCTION, "")
-        current_detailed_logging = config.get(CONF_DETAILED_LOGGING, False)
-        current_transcribe_gemini = config.get(
-            CONF_TRANSCRIBE_GEMINI, DEFAULT_TRANSCRIBE_GEMINI
-        )
-        current_encourage_web_search = config.get(
-            CONF_ENCOURAGE_WEB_SEARCH, DEFAULT_ENCOURAGE_WEB_SEARCH
-        )
-        current_show_text = config.get(
-            CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT
-        )
- 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_API_KEY, default=current_api_key): str,
-                    vol.Required(CONF_MODEL, default=current_model): vol.In(AVAILABLE_MODELS),
-                    vol.Required(CONF_VOICE, default=current_voice): VOICE_SELECTOR,
-                    vol.Optional(
-                        CONF_SYSTEM_INSTRUCTION,
-                        description={"suggested_value": current_system_instruction},
-                    ): str,
-                    vol.Optional(CONF_DETAILED_LOGGING, default=current_detailed_logging): selector.BooleanSelector(),
-                    vol.Optional(
-                        CONF_TRANSCRIBE_GEMINI,
-                        default=current_transcribe_gemini,
-                    ): selector.BooleanSelector(),
-                    vol.Optional(
-                        CONF_ENCOURAGE_WEB_SEARCH,
-                        default=current_encourage_web_search,
-                    ): selector.BooleanSelector(),
-                    vol.Optional(
-                        CONF_SHOW_TEXT,
-                        default=current_show_text,
-                    ): selector.BooleanSelector(),
-                }
-            ),
-            errors=errors,
+            data_schema=_provider_schema(provider, config),
         )
 
     @staticmethod
@@ -142,60 +207,22 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
-        """Get the options flow for this handler."""
+        """Return the options flow."""
         return GeminiLiveOptionsFlowHandler()
 
 
 class GeminiLiveOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options flow for Gemini Live re-configuration."""
+    """Manage live provider options."""
 
     async def async_step_init(self, user_input=None):
-        """Manage the options."""
+        """Update the provider's connection and response settings."""
+        config = {**self.config_entry.data, **self.config_entry.options}
+        provider = _provider(config)
         if user_input is not None:
+            user_input[CONF_PROVIDER] = provider
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
             return self.async_create_entry(title="", data=user_input)
-
-        # Pre-populate fields with existing data or options merged
-        config = {**self.config_entry.data, **self.config_entry.options}
-        current_api_key = config.get(CONF_API_KEY, "")
-        current_model = config.get(CONF_MODEL, DEFAULT_MODEL)
-        current_voice = config.get(CONF_VOICE, DEFAULT_VOICE)
-        current_system_instruction = config.get(CONF_SYSTEM_INSTRUCTION, "")
-        current_detailed_logging = config.get(CONF_DETAILED_LOGGING, False)
-        current_transcribe_gemini = config.get(
-            CONF_TRANSCRIBE_GEMINI, DEFAULT_TRANSCRIBE_GEMINI
-        )
-        current_encourage_web_search = config.get(
-            CONF_ENCOURAGE_WEB_SEARCH, DEFAULT_ENCOURAGE_WEB_SEARCH
-        )
-        current_show_text = config.get(
-            CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT
-        )
- 
-        schema_dict = {
-            vol.Required(CONF_API_KEY, default=current_api_key): str,
-            vol.Required(CONF_MODEL, default=current_model): vol.In(AVAILABLE_MODELS),
-            vol.Required(CONF_VOICE, default=current_voice): VOICE_SELECTOR,
-            vol.Optional(
-                CONF_SYSTEM_INSTRUCTION,
-                description={"suggested_value": current_system_instruction},
-            ): str,
-            vol.Optional(CONF_DETAILED_LOGGING, default=current_detailed_logging): selector.BooleanSelector(),
-            vol.Optional(
-                CONF_TRANSCRIBE_GEMINI,
-                default=current_transcribe_gemini,
-            ): selector.BooleanSelector(),
-            vol.Optional(
-                CONF_ENCOURAGE_WEB_SEARCH,
-                default=current_encourage_web_search,
-            ): selector.BooleanSelector(),
-            vol.Optional(
-                CONF_SHOW_TEXT,
-                default=current_show_text,
-            ): selector.BooleanSelector(),
-        }
-
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(schema_dict),
+            data_schema=_provider_schema(provider, config),
         )

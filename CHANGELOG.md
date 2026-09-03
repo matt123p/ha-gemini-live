@@ -2,6 +2,16 @@
 
 All notable changes to Gemini Live for Home Assistant are documented here.
 
+## Unreleased
+
+- Added OpenAI GPT Realtime as a provider option with provider-specific models,
+  voices, credentials, response transcription, and native audio streaming.
+- Factored the live-model protocol into a provider-neutral contract, with peer
+  Gemini SDK and OpenAI WebSocket adapters sharing the conversation, Assist tool,
+  session, STT, and TTS pipeline logic.
+- Kept existing config entries backward compatible by treating entries without
+  a provider field as Google Gemini.
+
 ## 1.0.5
 
 - Fixed Home Assistant script parameters being omitted from Gemini tool

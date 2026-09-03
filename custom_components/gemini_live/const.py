@@ -3,19 +3,24 @@
 DOMAIN = "gemini_live"
 
 CONF_API_KEY = "api_key"
+CONF_PROVIDER = "provider"
 CONF_MODEL = "model"
 CONF_VOICE = "voice"
 CONF_SYSTEM_INSTRUCTION = "system_instruction"
 CONF_DETAILED_LOGGING = "detailed_logging"
 CONF_TRANSCRIBE_GEMINI = "transcribe_gemini"
+CONF_TRANSCRIBE_GPT = "transcribe_gpt"
 CONF_ENCOURAGE_WEB_SEARCH = "encourage_web_search"
 CONF_SHOW_TEXT = "show_text"
 
 DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
 DEFAULT_VOICE = "Puck"
 DEFAULT_TRANSCRIBE_GEMINI = False
+DEFAULT_TRANSCRIBE_GPT = False
 DEFAULT_ENCOURAGE_WEB_SEARCH = False
 DEFAULT_SHOW_TEXT = True
+PROVIDER_GEMINI = "gemini"
+PROVIDER_OPENAI = "openai"
 GEMINI_LIVE_TTS_PLACEHOLDER = "-- gemini live --"
 DEFAULT_SYSTEM_INSTRUCTION = (
     "You are a helpful, concise voice assistant for the user's smart home, powered by Home Assistant. "
@@ -28,6 +33,27 @@ DEFAULT_SYSTEM_INSTRUCTION = (
 AVAILABLE_MODELS = [
     "gemini-3.1-flash-live-preview",
     "gemini-2.5-flash-native-audio-preview-12-2025",
+]
+
+OPENAI_DEFAULT_MODEL = "gpt-realtime-2.1"
+OPENAI_DEFAULT_VOICE = "marin"
+OPENAI_AVAILABLE_MODELS = [
+    "gpt-realtime-2.1",
+    "gpt-realtime-2.1-mini",
+    "gpt-realtime-2",
+    "gpt-realtime-1.5",
+]
+OPENAI_AVAILABLE_VOICES_INFO: list[tuple[str, str]] = [
+    ("marin", "Natural and expressive; recommended"),
+    ("cedar", "Natural and expressive; recommended"),
+    ("alloy", "Neutral and balanced"),
+    ("ash", "Clear and conversational"),
+    ("ballad", "Warm and expressive"),
+    ("coral", "Friendly and bright"),
+    ("echo", "Smooth and measured"),
+    ("sage", "Calm and composed"),
+    ("shimmer", "Bright and energetic"),
+    ("verse", "Versatile and natural"),
 ]
 
 # Languages supported by Gemini native audio models.
