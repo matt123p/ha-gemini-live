@@ -53,6 +53,7 @@ from .const import (
     GEMINI_LIVE_TTS_PLACEHOLDER,
     GEMINI_SESSION_MANAGER_KEY,
     GEMINI_TURN_STORE_KEY,
+    OPENAI_SYSTEM_INSTRUCTION,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
     SUPPORTED_LANGUAGES,
@@ -104,8 +105,12 @@ _PREPAYMENT_CREDITS_USER_MESSAGE = (
 END_CONVERSATION_TOOL_NAME = "end_conversation"
 
 _END_CONVERSATION_INSTRUCTION = (
-    f"Call {END_CONVERSATION_TOOL_NAME} when the user clearly indicates that they "
-    "are finished, says goodbye, or asks to end the conversation. Do not call it "
+    f"You MUST call {END_CONVERSATION_TOOL_NAME} as the FIRST action when the "
+    "user clearly indicates that they are finished, says goodbye, or asks to end "
+    "the conversation. Call it before saying a farewell or any other response. "
+    "This is required so Home Assistant stops listening; saying goodbye alone does "
+    "not end the conversation. Examples include 'I am finished', 'we are done', "
+    "'end the conversation', 'stop listening', 'goodbye', and 'bye'. Do not call it "
     "merely because you have finished answering the current request. If the user's "
     "first request in a conversation is only 'stop', 'cancel', 'silence', 'turn it "
     "off', or a similar short command, treat it first as a request to stop an "
@@ -119,10 +124,16 @@ _END_CONVERSATION_INSTRUCTION = (
 _END_CONVERSATION_TOOL = LiveTool(
     name=END_CONVERSATION_TOOL_NAME,
     description=(
-        "End the current voice conversation so Home Assistant stops listening "
-        "for a follow-up turn. Call only when the user indicates that the "
-        "conversation is finished."
+        "REQUIRED: immediately end the current voice conversation when the user "
+        "asks to finish, stop listening, says goodbye, or otherwise indicates they "
+        "are done. Call this before speaking a farewell so Home Assistant does not "
+        "listen for a follow-up turn."
     ),
+    parameters={
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
 )
 
 SHOW_TEXT_TOOL_NAME = "show_text"
@@ -1257,7 +1268,7 @@ class GPTRealtimeSTT(LiveModelSTT):
     integration_name = "GPT Realtime"
     transcribe_config_key = CONF_TRANSCRIBE_GPT
     default_transcribe = DEFAULT_TRANSCRIBE_GPT
-    default_system_instruction = DEFAULT_SYSTEM_INSTRUCTION
+    default_system_instruction = OPENAI_SYSTEM_INSTRUCTION
 
     async def _async_create_client(self, api_key: str) -> OpenAIRealtimeClient:
         """Create an OpenAI Realtime WebSocket client."""

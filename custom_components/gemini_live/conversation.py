@@ -35,6 +35,7 @@ from .const import (
     GEMINI_LIVE_TTS_PLACEHOLDER,
     GEMINI_SESSION_MANAGER_KEY,
     GEMINI_TURN_STORE_KEY,
+    OPENAI_SYSTEM_INSTRUCTION,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
     SUPPORTED_LANGUAGES,
@@ -520,6 +521,7 @@ class GPTRealtimeConversationAgent(LiveModelConversationAgent):
     conversation_event = "gpt_realtime_conversation_entry"
     transcribe_config_key = CONF_TRANSCRIBE_GPT
     default_transcribe = DEFAULT_TRANSCRIBE_GPT
+    default_system_instruction = OPENAI_SYSTEM_INSTRUCTION
     error_response = "Sorry, I could not get a response from GPT Realtime."
 
     async def _async_create_client(self, api_key: str) -> OpenAIRealtimeClient:

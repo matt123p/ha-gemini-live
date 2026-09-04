@@ -29,6 +29,14 @@ DEFAULT_SYSTEM_INSTRUCTION = (
     "Keep responses short, friendly, and natural for voice synthesis. "
     "Avoid formatting like bullet points, lists, bolding, or markdown in your speech."
 )
+OPENAI_SYSTEM_INSTRUCTION = (
+    f"{DEFAULT_SYSTEM_INSTRUCTION}\n\n"
+    "Aim for a balanced, natural voice response: answer the user's question fully "
+    "enough to be useful, then stop. Lead with the direct result or confirmation. "
+    "Include necessary context, clarification, or a brief follow-up question, but "
+    "avoid unnecessary background, repetition, and conversational filler. Give "
+    "more detail when the user asks for it or when the task genuinely needs it."
+)
 
 AVAILABLE_MODELS = [
     "gemini-3.1-flash-live-preview",

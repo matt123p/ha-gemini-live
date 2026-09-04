@@ -2,7 +2,7 @@
 
 All notable changes to Gemini Live for Home Assistant are documented here.
 
-## Unreleased
+## 1.0.6
 
 - Added OpenAI GPT Realtime as a provider option with provider-specific models,
   voices, credentials, response transcription, and native audio streaming.
@@ -15,6 +15,10 @@ All notable changes to Gemini Live for Home Assistant are documented here.
   when their audio sender or response receiver reports a transport failure.
 - Use the existing `-- gemini live --` pipeline placeholder for both providers so
   remote satellites can filter one consistent marker.
+- Make OpenAI GPT Realtime call `end_conversation` before a farewell, so Home
+  Assistant reliably stops listening when the user finishes the conversation.
+- Tune OpenAI GPT Realtime responses for a balanced voice style: direct and
+  concise by default, while preserving useful context and detail when needed.
 
 ## 1.0.5
 
