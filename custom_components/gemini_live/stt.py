@@ -140,17 +140,25 @@ SHOW_TEXT_TOOL_NAME = "show_text"
 
 _SHOW_TEXT_INSTRUCTION = (
     "The user WILL NOT see the transcription of what you say. "
-    "Instead, if you want to display something to the user to read, for example instructions, "
-    "lists, links, code blocks, or details that are better written down for the user than read out, "
-    f"then you must call the {SHOW_TEXT_TOOL_NAME} function. This is the only way the user "
+    f"You MUST call {SHOW_TEXT_TOOL_NAME} whenever your response contains a lot of "
+    "information or would be easier to scan, follow, copy, or refer back to in writing. "
+    "This includes multi-step instructions, detailed or long lists, comparisons, schedules, "
+    "names, dates, links, code, and other precise details. Err on the side of showing text "
+    "for detailed or information-dense answers. When using it, call it as your FIRST action, "
+    "before speaking any part of the answer. Put the complete useful written content in "
+    f"the {SHOW_TEXT_TOOL_NAME} call, then give a concise spoken summary. "
+    "Do not call it for a simple, brief answer. This function is the only way the user "
     "will see any text from you."
 )
 
 _SHOW_TEXT_TOOL = LiveTool(
     name=SHOW_TEXT_TOOL_NAME,
     description=(
-        "Display text or markdown to the user. Call this when you want to show "
-        "written details, instructions, or formatted text that the user should read."
+        "Display text or markdown to the user before speaking. Use this proactively as your "
+        "first action whenever a response "
+        "contains substantial information or details that are easier to scan, follow, "
+        "copy, or revisit in writing, including instructions, lists, comparisons, "
+        "schedules, names, dates, links, and code."
     ),
     parameters={
         "type": "object",
@@ -279,7 +287,7 @@ def _add_show_text_tool(
 
 
 def _add_show_text_instruction(system_instruction: str) -> str:
-    """Tell Gemini to use the show_text callback to show text to the user."""
+    """Tell the live model to use the show_text callback to show text to the user."""
     return f"{system_instruction}\n\n{_SHOW_TEXT_INSTRUCTION}"
 
 

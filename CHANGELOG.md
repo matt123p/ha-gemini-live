@@ -2,6 +2,12 @@
 
 All notable changes to Gemini Live for Home Assistant are documented here.
 
+## 1.0.7
+
+- Encourage Gemini Live and OpenAI GPT Realtime to call `show_text` before
+  speaking for detailed or information-dense answers, followed by a concise
+  spoken summary.
+
 ## 1.0.6
 
 - Added OpenAI GPT Realtime as a provider option with provider-specific models,
