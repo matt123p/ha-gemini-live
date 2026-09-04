@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 import hashlib
@@ -36,10 +36,11 @@ class PipelineTurn:
 class AudioStream:
     """Buffer one live-model audio response for the TTS stage."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_cancel: Callable[[], None] | None = None) -> None:
         """Initialize an audio stream."""
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._finished = False
+        self._on_cancel = on_cancel
 
     def add_chunk(self, chunk: bytes) -> None:
         """Add one PCM audio chunk."""
@@ -54,8 +55,14 @@ class AudioStream:
 
     async def async_chunks(self) -> AsyncGenerator[bytes]:
         """Yield buffered and future PCM chunks."""
-        while (chunk := await self._queue.get()) is not None:
-            yield chunk
+        consumed = False
+        try:
+            while (chunk := await self._queue.get()) is not None:
+                yield chunk
+            consumed = True
+        finally:
+            if not consumed and self._on_cancel is not None:
+                self._on_cancel()
 
 
 class TextStream:
@@ -204,6 +211,8 @@ class LiveSessionManager:
             WeakValueDictionary()
         )
         self._cleanup_registered: set[str] = set()
+        self._active_turn_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._cancel_tasks: dict[str, asyncio.Task[Any]] = {}
 
     @asynccontextmanager
     async def acquire(
@@ -238,12 +247,20 @@ class LiveSessionManager:
                     signature[:12],
                 )
 
+            current_task = asyncio.current_task()
+            if current_task is not None:
+                self._active_turn_tasks[conversation_id] = current_task
             try:
                 yield connection.session
+            except asyncio.CancelledError:
+                await self._async_close(conversation_id, connection)
+                raise
             except Exception:
                 await self._async_close(conversation_id, connection)
                 raise
             finally:
+                if self._active_turn_tasks.get(conversation_id) is current_task:
+                    self._active_turn_tasks.pop(conversation_id, None)
                 if conversation_id in self._completed_conversations:
                     await self._async_close(conversation_id, connection)
 
@@ -260,6 +277,48 @@ class LiveSessionManager:
     def reset_conversation(self, conversation_id: str) -> None:
         """Reset completed conversation status for a new user input."""
         self._completed_conversations.discard(conversation_id)
+
+    async def async_prepare_for_new_turn(self, conversation_id: str) -> bool:
+        """Finish pending cancellation and stop an overlapping provider turn."""
+        cancelled = False
+        if cancel_task := self._cancel_tasks.get(conversation_id):
+            await asyncio.shield(cancel_task)
+            cancelled = True
+        return await self._async_cancel_active_turn(conversation_id) or cancelled
+
+    async def _async_cancel_active_turn(self, conversation_id: str) -> bool:
+        """Cancel an unfinished provider turn."""
+        task = self._active_turn_tasks.get(conversation_id)
+        if task is None or task.done() or task is asyncio.current_task():
+            return False
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return True
+
+    def cancel_conversation(self, hass: HomeAssistant, conversation_id: str) -> None:
+        """Retire provider context after its audio consumer is cancelled."""
+        existing_task = self._cancel_tasks.get(conversation_id)
+        if existing_task is not None and not existing_task.done():
+            return
+
+        async def cancel_and_close() -> None:
+            await self._async_cancel_active_turn(conversation_id)
+            await self.async_close(conversation_id)
+
+        task = hass.async_create_task(
+            cancel_and_close(),
+            f"cancel live-model conversation {conversation_id}",
+        )
+        self._cancel_tasks[conversation_id] = task
+
+        def cancellation_done(completed_task: asyncio.Task[Any]) -> None:
+            if self._cancel_tasks.get(conversation_id) is completed_task:
+                self._cancel_tasks.pop(conversation_id, None)
+
+        task.add_done_callback(cancellation_done)
 
     def should_continue_conversation(self, conversation_id: str) -> bool:
         """Return whether Home Assistant should keep listening."""

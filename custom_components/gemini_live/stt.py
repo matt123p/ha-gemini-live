@@ -425,6 +425,12 @@ class LiveModelSTT(SpeechToTextEntity):
         started_at = time.monotonic()
         entry_data = self.hass.data[self.integration_domain][self.entry.entry_id]
         session_manager = entry_data[self.session_manager_key]
+        if await session_manager.async_prepare_for_new_turn(conversation_id):
+            _LOGGER.info(
+                "[turn=%s] cancelled unfinished provider turn for conversation %s",
+                turn_id,
+                conversation_id,
+            )
         session_manager.reset_conversation(conversation_id)
         turn_store = entry_data[self.turn_store_key]
         active_chat_session = chat_session.current_session.get()
@@ -552,7 +558,9 @@ class LiveModelSTT(SpeechToTextEntity):
         gemini_replied = asyncio.Event()
         first_audio = asyncio.Event()
         input_transcript_received = asyncio.Event()
-        response_audio_stream = AudioStream()
+        response_audio_stream = AudioStream(
+            lambda: session_manager.cancel_conversation(self.hass, conversation_id)
+        )
         response_text_stream = TextStream() if transcribe_output else None
 
         _LOGGER.warning(
