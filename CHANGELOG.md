@@ -7,6 +7,10 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 - Encourage Gemini Live and OpenAI GPT Realtime to call `show_text` before
   speaking for detailed or information-dense answers, followed by a concise
   spoken summary.
+- Removed the instruction that made short commands such as "stop" prioritize
+  stopping an actively ringing alarm or timer.
+- Fixed OpenAI GPT Realtime rejecting Home Assistant tools such as
+  `HassStartTimer` whose parameter schemas use a top-level union.
 
 ## 1.0.6
 

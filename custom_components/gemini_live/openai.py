@@ -15,10 +15,44 @@ from .utils import resample_16k_to_24k
 
 _REALTIME_URL = "wss://api.openai.com/v1/realtime"
 _TRANSCRIPTION_MODEL = "gpt-live-transcribe"
+_TOP_LEVEL_SCHEMA_COMBINATORS = ("oneOf", "anyOf", "allOf")
 
 
 class OpenAIRealtimeError(Exception):
     """An error event returned by the OpenAI Realtime API."""
+
+
+def _openai_parameters(schema: dict[str, Any]) -> dict[str, Any]:
+    """Return a function parameter schema accepted by OpenAI Realtime.
+
+    Home Assistant can generate a union of object schemas for an Assist tool.
+    OpenAI rejects schema combinators at the root of function parameters, so
+    expose the union of their properties as one object instead. Validation still
+    happens in Home Assistant when the tool is called.
+    """
+    parameters = {
+        key: value
+        for key, value in schema.items()
+        if key not in (*_TOP_LEVEL_SCHEMA_COMBINATORS, "enum", "const", "not")
+    }
+    properties = dict(parameters.get("properties", {}))
+    required = set(parameters.get("required", ()))
+
+    for keyword in _TOP_LEVEL_SCHEMA_COMBINATORS:
+        for subschema in schema.get(keyword, ()):
+            if not isinstance(subschema, dict):
+                continue
+            properties.update(subschema.get("properties", {}))
+            if keyword == "allOf":
+                required.update(subschema.get("required", ()))
+
+    parameters["type"] = "object"
+    parameters["properties"] = properties
+    if required:
+        parameters["required"] = sorted(required)
+    else:
+        parameters.pop("required", None)
+    return parameters
 
 
 class OpenAIRealtimeClient:
@@ -87,7 +121,7 @@ class OpenAIRealtimeSession:
                 "description": declaration.description,
             }
             if declaration.parameters:
-                tool["parameters"] = declaration.parameters
+                tool["parameters"] = _openai_parameters(declaration.parameters)
             tools.append(tool)
 
         await self._send({

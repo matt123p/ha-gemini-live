@@ -111,14 +111,7 @@ _END_CONVERSATION_INSTRUCTION = (
     "This is required so Home Assistant stops listening; saying goodbye alone does "
     "not end the conversation. Examples include 'I am finished', 'we are done', "
     "'end the conversation', 'stop listening', 'goodbye', and 'bye'. Do not call it "
-    "merely because you have finished answering the current request. If the user's "
-    "first request in a conversation is only 'stop', 'cancel', 'silence', 'turn it "
-    "off', or a similar short command, treat it first as a request to stop an "
-    "actively ringing alarm or timer. Before ending the conversation, use the "
-    "available Home Assistant tools to check for and stop the ringing alarm or "
-    "timer. Do not call end_conversation instead of attempting that action. After "
-    "the ringing alarm or timer has been stopped, or if none is ringing, call "
-    f"{END_CONVERSATION_TOOL_NAME} so Home Assistant stops listening."
+    "merely because you have finished answering the current request."
 )
 
 _END_CONVERSATION_TOOL = LiveTool(
