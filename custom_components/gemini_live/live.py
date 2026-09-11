@@ -25,6 +25,7 @@ class LiveConfig:
     system_instruction: str
     tools: list[LiveTool] = field(default_factory=list)
     transcribe_output: bool = True
+    support_barge_in: bool = False
 
 
 @dataclass(slots=True)
@@ -55,6 +56,11 @@ class LiveEvent:
     output_transcript: str | None = None
     tool_calls: list[LiveToolCall] = field(default_factory=list)
     turn_complete: bool = False
+
+    interrupted: bool = False
+    user_activity_started: bool = False
+    user_activity_stopped: bool = False
+
     go_away: Any = None
     session_resumption_update: Any = None
 

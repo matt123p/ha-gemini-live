@@ -67,6 +67,32 @@ def resample_24k_to_16k(data: bytes) -> bytes:
     return _resample_24k_to_16k_pure(data)
 
 
+class PCM24kTo16kStreamResampler:
+    """Preserve 24-to-16 kHz conversion phase across streaming chunks."""
+
+    def __init__(self) -> None:
+        self._pending = b""
+
+    def process(self, data: bytes) -> bytes:
+        """Convert complete three-sample groups and retain any partial group."""
+        data = self._pending + data
+        complete_bytes = len(data) // 6 * 6
+        self._pending = data[complete_bytes:]
+        if complete_bytes == 0:
+            return b""
+        return resample_24k_to_16k(data[:complete_bytes])
+
+    def flush(self) -> bytes:
+        """Convert the final partial group at the end of the response."""
+        pending = self._pending
+        self._pending = b""
+        return resample_24k_to_16k(pending)
+
+    def reset(self) -> None:
+        """Discard conversion state belonging to an interrupted response."""
+        self._pending = b""
+
+
 def resample_16k_to_24k(data: bytes) -> bytes:
     """Resample raw 16-bit signed PCM mono audio from 16kHz to 24kHz."""
     num_samples = len(data) // 2

@@ -187,6 +187,10 @@ upgrade to the latest version.
 | Transcribe Gemini / GPT | Streams the model's spoken-response transcript into Home Assistant while native audio is still arriving. Disabled by default for the lowest playback latency. |
 | Encourage web search | Encourages the model to use an exposed search-like Assist tool for current, recent, time-sensitive, or explicitly requested online information. Disabled by default. |
 | Show text | Exposes a callback function so the model can display formatted text/markdown in the Home Assistant chat UI instead of the default placeholder. Only active when response transcription is disabled. Enabled by default. |
+| Support barge-in | Experimental: keeps microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback (acoustic echo cancellation is strongly recommended, otherwise the assistant may hear itself and self-interrupt), and uses smaller input chunks (~40 ms) for lower interruption latency. Does not change the response-transcription setting. Disabled by default. |
+
+Remote-device authors should follow the
+[remote satellite barge-in implementation guide](REMOTE_SATELLITE_BARGE_IN.md).
 
 To change the options later, open **Settings > Devices & services**, select
 **Gemini Live**, and select **Configure** or **Reconfigure**.

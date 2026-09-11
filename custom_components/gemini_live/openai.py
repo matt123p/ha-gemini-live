@@ -85,7 +85,10 @@ class _OpenAIConnect:
             headers={"Authorization": f"Bearer {self._api_key}"},
             heartbeat=20,
         )
-        self._session = OpenAIRealtimeSession(websocket)
+        self._session = OpenAIRealtimeSession(
+            websocket,
+            support_barge_in=self._config.support_barge_in,
+        )
         try:
             async with asyncio.timeout(15):
                 await self._session.async_configure(self._config)
@@ -102,8 +105,13 @@ class _OpenAIConnect:
 class OpenAIRealtimeSession:
     """Translate OpenAI client/server events to the neutral contract."""
 
-    def __init__(self, websocket: ClientWebSocketResponse) -> None:
+    def __init__(
+        self,
+        websocket: ClientWebSocketResponse,
+        support_barge_in: bool = False,
+    ) -> None:
         self._ws = websocket
+        self._support_barge_in = support_barge_in
         self._transcribe_output = False
         self._tool_calls_seen: set[str] = set()
 
@@ -124,6 +132,19 @@ class OpenAIRealtimeSession:
                 tool["parameters"] = _openai_parameters(declaration.parameters)
             tools.append(tool)
 
+        if self._support_barge_in:
+            # Server VAD owns turn detection and automatically creates a
+            # replacement response when new speech interrupts the model.
+            turn_detection: dict[str, Any] | None = {
+                "type": "server_vad",
+                "create_response": True,
+                "interrupt_response": True,
+                "prefix_padding_ms": 300,
+                "silence_duration_ms": 500,
+            }
+        else:
+            turn_detection = None
+
         await self._send({
             "type": "session.update",
             "session": {
@@ -134,7 +155,7 @@ class OpenAIRealtimeSession:
                 "audio": {
                     "input": {
                         "format": {"type": "audio/pcm", "rate": 24000},
-                        "turn_detection": None,
+                        "turn_detection": turn_detection,
                         "transcription": {"model": _TRANSCRIPTION_MODEL},
                     },
                     "output": {
@@ -160,6 +181,11 @@ class OpenAIRealtimeSession:
         })
 
     async def end_audio(self) -> None:
+        if self._support_barge_in:
+            # Server VAD owns commits and response creation while barge-in is
+            # enabled; the input stream simply stays open until it ends.
+            return
+
         await self._send({"type": "input_audio_buffer.commit"})
         await self._send({"type": "response.create"})
 
@@ -187,15 +213,27 @@ class OpenAIRealtimeSession:
         await self._send({"type": "response.create"})
 
     async def receive(self) -> AsyncIterator[LiveEvent]:
+        interruption_active = False
         while True:
             event = await self._receive_event()
             event_type = event.get("type")
             if event_type == "error":
                 raise _error_from_event(event)
             if event_type == "response.output_audio.delta":
-                yield LiveEvent(
-                    audio=base64.b64decode(event.get("delta", ""), validate=True)
-                )
+                audio = base64.b64decode(event.get("delta", ""), validate=True)
+                if audio and interruption_active:
+                    interruption_active = False
+                yield LiveEvent(audio=audio)
+            elif event_type == "input_audio_buffer.speech_started":
+                if self._support_barge_in and not interruption_active:
+                    interruption_active = True
+                    yield LiveEvent(
+                        user_activity_started=True,
+                        interrupted=True,
+                    )
+            elif event_type == "input_audio_buffer.speech_stopped":
+                if self._support_barge_in:
+                    yield LiveEvent(user_activity_stopped=True)
             elif (
                 self._transcribe_output
                 and event_type == "response.output_audio_transcript.delta"
@@ -206,7 +244,13 @@ class OpenAIRealtimeSession:
                     yield LiveEvent(input_transcript=transcript)
             elif event_type == "response.done":
                 response = event.get("response", {})
-                if response.get("status") == "failed":
+                status = response.get("status")
+                if self._support_barge_in and status == "cancelled":
+                    # Server VAD interrupted the current generation; a
+                    # replacement response is created automatically.
+                    yield LiveEvent(interrupted=True)
+                    continue
+                if status == "failed":
                     raise OpenAIRealtimeError(
                         str(
                             response.get("status_details")

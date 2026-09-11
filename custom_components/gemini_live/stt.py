@@ -15,6 +15,8 @@ from homeassistant.components.stt import (
     AudioCodecs,
     AudioFormats,
     AudioSampleRates,
+    DEFAULT_AUDIO_PROCESSING,
+    SpeechAudioProcessing,
     SpeechMetadata,
     SpeechResult,
     SpeechResultState,
@@ -41,9 +43,11 @@ from .const import (
     CONF_PROVIDER,
     CONF_SYSTEM_INSTRUCTION,
     CONF_SHOW_TEXT,
+    CONF_SUPPORT_BARGE_IN,
     CONF_TRANSCRIBE_GEMINI,
     CONF_TRANSCRIBE_GPT,
     CONF_VOICE,
+    DEFAULT_SUPPORT_BARGE_IN,
     DEFAULT_TRANSCRIBE_GEMINI,
     DEFAULT_TRANSCRIBE_GPT,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
@@ -65,12 +69,19 @@ from .runtime import (
     TextStream,
     active_pipeline_context,
 )
-from .utils import resample_24k_to_16k, set_detailed_logging
+from .utils import (
+    PCM24kTo16kStreamResampler,
+    set_detailed_logging,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 # Target optimal chunk payload size (100ms of 16kHz 16-bit mono PCM = 3200 bytes)
 OPTIMAL_STREAM_CHUNK_SIZE = 3200
+
+# Smaller chunks while barge-in is enabled (40ms of 16kHz 16-bit mono PCM)
+# so user speech is forwarded to the provider with less interruption latency.
+BARGE_IN_STREAM_CHUNK_SIZE = 1280
 
 _SEARCH_TOOL_HINTS = ("search", "web", "google")
 
@@ -100,6 +111,16 @@ _PREPAYMENT_CREDITS_USER_MESSAGE = (
     "Gemini Live is unavailable because your Google AI prepayment credits "
     f"are depleted. Please go to {_PREPAYMENT_CREDITS_URL} to add credits "
     "or manage your project's billing."
+)
+
+_OPENAI_NO_CREDITS_ERROR_MARKER = "no credits remaining"
+_OPENAI_NO_CREDITS_ISSUE_PREFIX = "openai_no_credits"
+_OPENAI_NO_CREDITS_URL = (
+    "https://platform.openai.com/settings/organization/billing/"
+)
+_OPENAI_NO_CREDITS_USER_MESSAGE = (
+    "GPT Realtime is unavailable because your OpenAI account has no credits "
+    f"remaining. Please go to {_OPENAI_NO_CREDITS_URL} to add credits."
 )
 
 END_CONVERSATION_TOOL_NAME = "end_conversation"
@@ -189,6 +210,8 @@ def _user_visible_api_error(exc: BaseException) -> str | None:
             return _SPENDING_CAP_USER_MESSAGE
         if _PREPAYMENT_CREDITS_ERROR_MARKER in error_text:
             return _PREPAYMENT_CREDITS_USER_MESSAGE
+        if _OPENAI_NO_CREDITS_ERROR_MARKER in error_text:
+            return _OPENAI_NO_CREDITS_USER_MESSAGE
         current = current.__cause__ or current.__context__
     return None
 
@@ -201,6 +224,11 @@ def _spending_cap_issue_id(entry_id: str) -> str:
 def _prepayment_credits_issue_id(entry_id: str) -> str:
     """Return the prepaid credits Repairs issue ID for one config entry."""
     return f"{_PREPAYMENT_CREDITS_ISSUE_PREFIX}_{entry_id}"
+
+
+def _openai_no_credits_issue_id(entry_id: str) -> str:
+    """Return the OpenAI credits Repairs issue ID for one config entry."""
+    return f"{_OPENAI_NO_CREDITS_ISSUE_PREFIX}_{entry_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +433,29 @@ class LiveModelSTT(SpeechToTextEntity):
     def unique_id(self) -> str:
         return self._attr_unique_id
 
+    @property
+    def audio_processing(self) -> SpeechAudioProcessing:
+        """Let the live provider own turn detection while barge-in is enabled.
+
+        Home Assistant's end-of-command VAD would stop feeding the microphone
+        stream after the initial user command, which prevents barge-in. With
+        barge-in enabled the provider's own VAD decides when the user stops
+        and starts speaking, so the stream must stay open.
+        """
+        config = {**self.entry.data, **self.entry.options}
+
+        if not config.get(
+            CONF_SUPPORT_BARGE_IN,
+            DEFAULT_SUPPORT_BARGE_IN,
+        ):
+            return DEFAULT_AUDIO_PROCESSING
+
+        return SpeechAudioProcessing(
+            requires_external_vad=False,
+            prefers_auto_gain_enabled=True,
+            prefers_noise_reduction_enabled=True,
+        )
+
     async def _async_run_audio_stream_sdk(
         self,
         metadata: SpeechMetadata,
@@ -416,6 +467,7 @@ class LiveModelSTT(SpeechToTextEntity):
         transcribe_output: bool,
         encourage_web_search: bool,
         show_text: bool,
+        support_barge_in: bool,
         result_future: asyncio.Future[SpeechResult],
         conversation_id: str,
         device_id: str | None,
@@ -530,16 +582,22 @@ class LiveModelSTT(SpeechToTextEntity):
             system_instruction=system_instruction,
             tools=live_tools,
             transcribe_output=transcribe_output,
+            support_barge_in=support_barge_in,
         )
 
         _LOGGER.warning(
-            "[turn=%s] live config prepared model=%s voice=%s has_tools=%s output_transcription=%s",
+            "[turn=%s] live config prepared model=%s voice=%s has_tools=%s output_transcription=%s barge_in=%s",
             turn_id,
             model,
             voice,
             bool(live_tools),
             transcribe_output,
+            support_barge_in,
         )
+        if support_barge_in:
+            _LOGGER.debug(
+                "[turn=%s] barge-in enabled for provider session", turn_id
+            )
 
         native_audio_model = "native-audio" in (model or "")
         _LOGGER.warning(
@@ -559,9 +617,15 @@ class LiveModelSTT(SpeechToTextEntity):
         gemini_replied = asyncio.Event()
         first_audio = asyncio.Event()
         input_transcript_received = asyncio.Event()
+        stream_chunk_size = (
+            BARGE_IN_STREAM_CHUNK_SIZE
+            if support_barge_in
+            else OPTIMAL_STREAM_CHUNK_SIZE
+        )
         response_audio_stream = AudioStream(
             lambda: session_manager.cancel_conversation(self.hass, conversation_id)
         )
+        response_audio_resampler = PCM24kTo16kStreamResampler()
         response_text_stream = TextStream() if transcribe_output else None
 
         _LOGGER.warning(
@@ -584,6 +648,11 @@ class LiveModelSTT(SpeechToTextEntity):
                 self.integration_domain,
                 _prepayment_credits_issue_id(self.entry.entry_id),
             )
+            async_delete_issue(
+                self.hass,
+                self.integration_domain,
+                _openai_no_credits_issue_id(self.entry.entry_id),
+            )
             _LOGGER.warning(
                 "[turn=%s] acquired live-model session conversation=%s",
                 turn_id,
@@ -604,7 +673,10 @@ class LiveModelSTT(SpeechToTextEntity):
                     async for chunk in stream:
                         if not chunk:
                             continue
-                        if gemini_replied.is_set():
+                        if (
+                            not support_barge_in
+                            and gemini_replied.is_set()
+                        ):
                             _LOGGER.warning(
                                 "[turn=%s] send_audio stopped because the model started replying",
                                 turn_id,
@@ -620,9 +692,9 @@ class LiveModelSTT(SpeechToTextEntity):
 
                         audio_buffer.extend(chunk)
 
-                        while len(audio_buffer) >= OPTIMAL_STREAM_CHUNK_SIZE:
-                            dispatch_chunk = bytes(audio_buffer[:OPTIMAL_STREAM_CHUNK_SIZE])
-                            del audio_buffer[:OPTIMAL_STREAM_CHUNK_SIZE]
+                        while len(audio_buffer) >= stream_chunk_size:
+                            dispatch_chunk = bytes(audio_buffer[:stream_chunk_size])
+                            del audio_buffer[:stream_chunk_size]
 
                             chunk_count += 1
                             if diagnostics_enabled:
@@ -641,7 +713,9 @@ class LiveModelSTT(SpeechToTextEntity):
                             await session.send_audio(dispatch_chunk)
                             audio_sent = True
 
-                    if len(audio_buffer) > 0 and not gemini_replied.is_set():
+                    if len(audio_buffer) > 0 and (
+                        support_barge_in or not gemini_replied.is_set()
+                    ):
                         chunk_count += 1
                         dispatch_chunk = bytes(audio_buffer)
                         if diagnostics_enabled:
@@ -662,7 +736,9 @@ class LiveModelSTT(SpeechToTextEntity):
                             _analyse_pcm(b"".join(pcm_for_diag)),
                         )
 
-                    if audio_sent and not gemini_replied.is_set():
+                    if audio_sent and (
+                        support_barge_in or not gemini_replied.is_set()
+                    ):
                         _LOGGER.debug("[turn=%s] signalling audio stream end", turn_id)
                         await session.end_audio()
                 except asyncio.CancelledError:
@@ -678,18 +754,44 @@ class LiveModelSTT(SpeechToTextEntity):
             async def receive_responses() -> None:
                 nonlocal audio_response_bytes, audio_response_chunk_count
                 nonlocal last_response_activity, show_text_content
+                replacement_response_pending = False
                 try:
                     _LOGGER.warning("[turn=%s] receive_responses started", turn_id)
                     async for response in session.receive():
-                        _LOGGER.warning(
-                            "[turn=%s] received event tool_calls=%s audio=%s text=%s go_away=%s session_resumption_update=%s",
-                            turn_id,
-                            bool(response.tool_calls),
-                            bool(response.audio),
-                            bool(response.text or response.output_transcript),
-                            bool(response.go_away),
-                            bool(response.session_resumption_update),
-                        )
+                        # Audio packets are frequent and must stay on the hot
+                        # path. Logging every packet can stall Home Assistant's
+                        # event loop and turn steady PCM into bursty delivery.
+                        if not response.audio:
+                            _LOGGER.debug(
+                                "[turn=%s] received event tool_calls=%s text=%s go_away=%s session_resumption_update=%s",
+                                turn_id,
+                                bool(response.tool_calls),
+                                bool(response.text or response.output_transcript),
+                                bool(response.go_away),
+                                bool(response.session_resumption_update),
+                            )
+                        if response.user_activity_started:
+                            _LOGGER.debug(
+                                "[turn=%s] user activity started while model response active",
+                                turn_id,
+                            )
+                        if response.user_activity_stopped:
+                            _LOGGER.debug(
+                                "[turn=%s] user activity stopped", turn_id
+                            )
+                        if response.interrupted:
+                            # An interrupted generation is followed by a
+                            # replacement response in the same provider turn.
+                            # Discard queued output audio but keep the Home
+                            # Assistant stream open.
+                            response_audio_stream.interrupt()
+                            response_audio_resampler.reset()
+                            replacement_response_pending = True
+                            text_response_parts.clear()
+                            _LOGGER.debug(
+                                "[turn=%s] provider response interrupted; discarded queued output audio and waiting for replacement response",
+                                turn_id,
+                            )
                         if response.go_away:
                             _LOGGER.warning(
                                 "[turn=%s] Gemini go_away=%s",
@@ -799,14 +901,25 @@ class LiveModelSTT(SpeechToTextEntity):
                         if response.audio:
                             if not gemini_replied.is_set():
                                 gemini_replied.set()
+                                if support_barge_in:
+                                    _LOGGER.debug(
+                                        "[turn=%s] microphone forwarding remains active during model output",
+                                        turn_id,
+                                    )
+                            if replacement_response_pending:
+                                replacement_response_pending = False
+                                _LOGGER.debug(
+                                    "[turn=%s] replacement response started",
+                                    turn_id,
+                                )
                             audio_response_chunk_count += 1
                             audio_response_bytes += len(response.audio)
                             response_audio_stream.add_chunk(
-                                resample_24k_to_16k(response.audio)
+                                response_audio_resampler.process(response.audio)
                             )
                             first_audio.set()
 
-                        if response.output_transcript:
+                        if transcribe_output and response.output_transcript:
                             transcription = response.output_transcript
                             _LOGGER.debug(
                                 "[turn=%s] output transcription chunk len=%d",
@@ -840,6 +953,15 @@ class LiveModelSTT(SpeechToTextEntity):
                             )
 
                         if response.turn_complete:
+                            if support_barge_in and replacement_response_pending:
+                                # This completes the interrupted assistant
+                                # generation, not the whole HA response stream.
+                                # The provider still owes a replacement response.
+                                _LOGGER.debug(
+                                    "[turn=%s] interrupted generation completed; ignoring terminal turn completion",
+                                    turn_id,
+                                )
+                                continue
                             if native_audio_model and not gemini_replied.is_set():
                                 _LOGGER.warning(
                                     "[turn=%s] turnComplete before audio; keeping session open and waiting",
@@ -851,6 +973,9 @@ class LiveModelSTT(SpeechToTextEntity):
                                 turn_id,
                                 audio_response_chunk_count,
                                 len(text_response_parts),
+                            )
+                            response_audio_stream.add_chunk(
+                                response_audio_resampler.flush()
                             )
                             break
                 except asyncio.CancelledError:
@@ -926,7 +1051,11 @@ class LiveModelSTT(SpeechToTextEntity):
                     )
                     send_task.cancel()
 
-            cancel_on_reply_task = asyncio.create_task(_cancel_sender_on_reply())
+            # With barge-in the microphone sender must live for the whole
+            # provider turn so the user can interrupt while the model speaks.
+            cancel_on_reply_task: asyncio.Task[None] | None = None
+            if not support_barge_in:
+                cancel_on_reply_task = asyncio.create_task(_cancel_sender_on_reply())
             try:
                 done, _pending = await asyncio.wait(
                     [send_task, receive_task],
@@ -989,9 +1118,11 @@ class LiveModelSTT(SpeechToTextEntity):
                 else:
                     publish_task.cancel()
             finally:
-                if not cancel_on_reply_task.done():
+                if cancel_on_reply_task is not None and not cancel_on_reply_task.done():
                     cancel_on_reply_task.cancel()
-                tasks = [send_task, receive_task, cancel_on_reply_task]
+                tasks: list[asyncio.Task[Any]] = [send_task, receive_task]
+                if cancel_on_reply_task is not None:
+                    tasks.append(cancel_on_reply_task)
                 tasks.append(publish_task)
                 for task in tasks:
                     if not task.done():
@@ -1078,6 +1209,7 @@ class LiveModelSTT(SpeechToTextEntity):
         transcribe_output: bool,
         encourage_web_search: bool,
         show_text: bool,
+        support_barge_in: bool,
     ) -> SpeechResult:
         """Run the Live turn in the background so TTS can consume it immediately."""
         result_future: asyncio.Future[SpeechResult] = asyncio.Future()
@@ -1093,6 +1225,7 @@ class LiveModelSTT(SpeechToTextEntity):
                 transcribe_output,
                 encourage_web_search,
                 show_text,
+                support_barge_in,
                 result_future,
                 conversation_id,
                 device_id,
@@ -1109,23 +1242,31 @@ class LiveModelSTT(SpeechToTextEntity):
                 result_future.set_result(SpeechResult(None, SpeechResultState.ERROR))
             except Exception as exc:  # noqa: BLE001
                 if user_message := self._api_error_message(exc):
-                    prepayment_credits_depleted = (
-                        user_message == _PREPAYMENT_CREDITS_USER_MESSAGE
-                    )
-                    issue_id = (
-                        _prepayment_credits_issue_id(self.entry.entry_id)
-                        if prepayment_credits_depleted
-                        else _spending_cap_issue_id(self.entry.entry_id)
-                    )
-                    issue_url = (
-                        _PREPAYMENT_CREDITS_URL
-                        if prepayment_credits_depleted
-                        else _SPENDING_CAP_URL
-                    )
-                    translation_key = "spending_cap_exceeded"
+                    if user_message == _SPENDING_CAP_USER_MESSAGE:
+                        issue_id = _spending_cap_issue_id(self.entry.entry_id)
+                        issue_url = _SPENDING_CAP_URL
+                        translation_key = "spending_cap_exceeded"
+                        url_placeholder = "spending_cap_url"
+                        reason = "the monthly spending cap was exceeded"
+                    elif user_message == _PREPAYMENT_CREDITS_USER_MESSAGE:
+                        issue_id = _prepayment_credits_issue_id(
+                            self.entry.entry_id
+                        )
+                        issue_url = _PREPAYMENT_CREDITS_URL
+                        translation_key = "spending_cap_exceeded"
+                        url_placeholder = "spending_cap_url"
+                        reason = "prepayment credits are depleted"
+                    else:
+                        issue_id = _openai_no_credits_issue_id(
+                            self.entry.entry_id
+                        )
+                        issue_url = _OPENAI_NO_CREDITS_URL
+                        translation_key = "openai_no_credits"
+                        url_placeholder = "billing_url"
+                        reason = "OpenAI credits are depleted"
                     translation_placeholders = {
                         "entry_title": self.entry.title,
-                        "spending_cap_url": issue_url,
+                        url_placeholder: issue_url,
                     }
                     async_create_issue(
                         self.hass,
@@ -1155,12 +1296,9 @@ class LiveModelSTT(SpeechToTextEntity):
                         )
                     )
                     _LOGGER.warning(
-                        "Gemini Live is unavailable because %s",
-                        (
-                            "prepayment credits are depleted"
-                            if prepayment_credits_depleted
-                            else "the monthly spending cap was exceeded"
-                        ),
+                        "%s is unavailable because %s",
+                        self.integration_name,
+                        reason,
                     )
                     result_future.set_result(
                         SpeechResult(user_message, SpeechResultState.SUCCESS)
@@ -1215,8 +1353,14 @@ class LiveModelSTT(SpeechToTextEntity):
         model = config.get(CONF_MODEL)
         voice = config.get(CONF_VOICE)
         custom_instruction = config.get(CONF_SYSTEM_INSTRUCTION, "")
-        transcribe_output = bool(
+        user_requested_transcription = bool(
             config.get(self.transcribe_config_key, self.default_transcribe)
+        )
+        support_barge_in = bool(
+            config.get(
+                CONF_SUPPORT_BARGE_IN,
+                DEFAULT_SUPPORT_BARGE_IN,
+            )
         )
         encourage_web_search = bool(
             config.get(CONF_ENCOURAGE_WEB_SEARCH, DEFAULT_ENCOURAGE_WEB_SEARCH)
@@ -1229,12 +1373,13 @@ class LiveModelSTT(SpeechToTextEntity):
         )
 
         _LOGGER.warning(
-            "[turn=%s] STT start language=%s model=%s voice=%s detailed_logging=%s",
+            "[turn=%s] STT start language=%s model=%s voice=%s detailed_logging=%s barge_in=%s",
             turn_id,
             metadata.language or "en",
             model,
             voice,
             bool(config.get(CONF_DETAILED_LOGGING, False)),
+            support_barge_in,
         )
 
         if not api_key:
@@ -1248,9 +1393,10 @@ class LiveModelSTT(SpeechToTextEntity):
             model,
             voice,
             custom_instruction,
-            transcribe_output,
+            user_requested_transcription,
             encourage_web_search,
             show_text,
+            support_barge_in,
         )
 
 
@@ -1285,5 +1431,5 @@ class GPTRealtimeSTT(LiveModelSTT):
 
     @staticmethod
     def _api_error_message(exc: BaseException) -> str | None:
-        """OpenAI errors are currently surfaced through normal HA error handling."""
-        return None
+        """Return OpenAI billing errors that the user can resolve."""
+        return _user_visible_api_error(exc)

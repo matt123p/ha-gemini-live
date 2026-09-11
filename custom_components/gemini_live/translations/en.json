@@ -21,7 +21,8 @@
           "transcribe_gemini": "Transcribe Gemini",
           "transcribe_gpt": "Transcribe GPT",
           "encourage_web_search": "Encourage web search",
-          "show_text": "Show text"
+          "show_text": "Show text",
+          "support_barge_in": "Support barge-in"
         },
         "data_description": {
           "api_key": "Audio, text, Home Assistant tool schemas, and tool results are sent to the selected provider.",
@@ -32,7 +33,8 @@
           "transcribe_gemini": "Stream Gemini's spoken-response transcript into Home Assistant. Disabling this gives the lowest reply-audio latency.",
           "transcribe_gpt": "Stream GPT's spoken-response transcript into Home Assistant. Disabling this gives the lowest reply-audio latency.",
           "encourage_web_search": "Tell the model to use an exposed search-like Assist tool for current or explicitly requested online information.",
-          "show_text": "Expose show_text so the model can display formatted text when response transcription is off."
+          "show_text": "Expose show_text so the model can display formatted text when response transcription is off.",
+          "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage."
         }
       },
       "reconfigure": {
@@ -47,7 +49,11 @@
           "transcribe_gemini": "Transcribe Gemini",
           "transcribe_gpt": "Transcribe GPT",
           "encourage_web_search": "Encourage web search",
-          "show_text": "Show text"
+          "show_text": "Show text",
+          "support_barge_in": "Support barge-in"
+        },
+        "data_description": {
+          "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage."
         }
       }
     },
@@ -69,7 +75,11 @@
           "transcribe_gemini": "Transcribe Gemini",
           "transcribe_gpt": "Transcribe GPT",
           "encourage_web_search": "Encourage web search",
-          "show_text": "Show text"
+          "show_text": "Show text",
+          "support_barge_in": "Support barge-in"
+        },
+        "data_description": {
+          "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage."
         }
       }
     }
@@ -78,6 +88,10 @@
     "spending_cap_exceeded": {
       "title": "Gemini Live billing unavailable",
       "description": "The Google AI project used by **{entry_title}** cannot process Gemini Live requests because its spending cap or available prepaid credit balance has been exhausted. [Manage the project's billing]({spending_cap_url}), then try Gemini Live again. This issue will clear automatically after Gemini Live connects successfully."
+    },
+    "openai_no_credits": {
+      "title": "OpenAI credits depleted",
+      "description": "The OpenAI account used by **{entry_title}** cannot process GPT Realtime requests because it has no credits remaining. [Add credits to the account]({billing_url}), then try GPT Realtime again. This issue will clear automatically after GPT Realtime connects successfully."
     }
   }
 }

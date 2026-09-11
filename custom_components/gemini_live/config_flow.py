@@ -17,12 +17,14 @@ from .const import (
     CONF_PROVIDER,
     CONF_SHOW_TEXT,
     CONF_SYSTEM_INSTRUCTION,
+    CONF_SUPPORT_BARGE_IN,
     CONF_TRANSCRIBE_GEMINI,
     CONF_TRANSCRIBE_GPT,
     CONF_VOICE,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_MODEL,
     DEFAULT_SHOW_TEXT,
+    DEFAULT_SUPPORT_BARGE_IN,
     DEFAULT_TRANSCRIBE_GEMINI,
     DEFAULT_TRANSCRIBE_GPT,
     DEFAULT_VOICE,
@@ -31,8 +33,13 @@ from .const import (
     OPENAI_AVAILABLE_VOICES_INFO,
     OPENAI_DEFAULT_MODEL,
     OPENAI_DEFAULT_VOICE,
+    PERSONAPLEX_AVAILABLE_MODELS,
+    PERSONAPLEX_AVAILABLE_VOICES_INFO,
+    PERSONAPLEX_DEFAULT_MODEL,
+    PERSONAPLEX_DEFAULT_VOICE,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
+    PROVIDER_PERSONAPLEX,
 )
 
 PROVIDER_SELECTOR = selector.SelectSelector(
@@ -40,6 +47,7 @@ PROVIDER_SELECTOR = selector.SelectSelector(
         options=[
             selector.SelectOptionDict(value=PROVIDER_GEMINI, label="Google Gemini"),
             selector.SelectOptionDict(value=PROVIDER_OPENAI, label="OpenAI"),
+            selector.SelectOptionDict(value=PROVIDER_PERSONAPLEX, label="fal.ai PersonaPlex"),
         ],
         mode=selector.SelectSelectorMode.DROPDOWN,
     )
@@ -68,6 +76,16 @@ OPENAI_VOICE_SELECTOR = selector.SelectSelector(
     )
 )
 
+PERSONAPLEX_VOICE_SELECTOR = selector.SelectSelector(
+    selector.SelectSelectorConfig(
+        options=[
+            selector.SelectOptionDict(value=name, label=f"{name} - {description}")
+            for name, description in PERSONAPLEX_AVAILABLE_VOICES_INFO
+        ],
+        mode=selector.SelectSelectorMode.DROPDOWN,
+    )
+)
+
 
 def _provider(config: dict[str, Any]) -> str:
     """Return the configured provider, defaulting legacy entries to Gemini."""
@@ -78,10 +96,15 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
     """Build a provider-specific setup/options schema."""
     current = config or {}
     is_openai = provider == PROVIDER_OPENAI
-    models = OPENAI_AVAILABLE_MODELS if is_openai else AVAILABLE_MODELS
-    default_model = OPENAI_DEFAULT_MODEL if is_openai else DEFAULT_MODEL
-    default_voice = OPENAI_DEFAULT_VOICE if is_openai else DEFAULT_VOICE
-    voice_selector = OPENAI_VOICE_SELECTOR if is_openai else GEMINI_VOICE_SELECTOR
+    is_personaplex = provider == PROVIDER_PERSONAPLEX
+    models = (PERSONAPLEX_AVAILABLE_MODELS if is_personaplex else
+              OPENAI_AVAILABLE_MODELS if is_openai else AVAILABLE_MODELS)
+    default_model = (PERSONAPLEX_DEFAULT_MODEL if is_personaplex else
+                     OPENAI_DEFAULT_MODEL if is_openai else DEFAULT_MODEL)
+    default_voice = (PERSONAPLEX_DEFAULT_VOICE if is_personaplex else
+                     OPENAI_DEFAULT_VOICE if is_openai else DEFAULT_VOICE)
+    voice_selector = (PERSONAPLEX_VOICE_SELECTOR if is_personaplex else
+                      OPENAI_VOICE_SELECTOR if is_openai else GEMINI_VOICE_SELECTOR)
     transcribe_key = CONF_TRANSCRIBE_GPT if is_openai else CONF_TRANSCRIBE_GEMINI
     default_transcribe = (
         DEFAULT_TRANSCRIBE_GPT if is_openai else DEFAULT_TRANSCRIBE_GEMINI
@@ -127,7 +150,20 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
             CONF_SHOW_TEXT,
             default=current.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT),
         ): selector.BooleanSelector(),
+        vol.Optional(
+            CONF_SUPPORT_BARGE_IN,
+            default=current.get(
+                CONF_SUPPORT_BARGE_IN,
+                DEFAULT_SUPPORT_BARGE_IN,
+            ),
+        ): selector.BooleanSelector(),
     }
+    if is_personaplex:
+        # PersonaPlex currently has no function-calling, display-text tool, or
+        # explicit VAD event surface in its public realtime API.
+        for key in (CONF_ENCOURAGE_WEB_SEARCH, CONF_SHOW_TEXT, CONF_SUPPORT_BARGE_IN):
+            marker = next(marker for marker in fields if marker.schema == key)
+            del fields[marker]
     return vol.Schema(fields)
 
 
@@ -166,21 +202,19 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             user_input[CONF_PROVIDER] = selected_provider
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
-            title = (
-                "GPT Realtime"
-                if selected_provider == PROVIDER_OPENAI
-                else "Gemini Live"
-            )
+            title = {
+                PROVIDER_OPENAI: "GPT Realtime",
+                PROVIDER_PERSONAPLEX: "PersonaPlex",
+            }.get(selected_provider, "Gemini Live")
             return self.async_create_entry(title=title, data=user_input)
         return self.async_show_form(
             step_id="provider",
             data_schema=_provider_schema(selected_provider),
             description_placeholders={
-                "provider": (
-                    "OpenAI"
-                    if selected_provider == PROVIDER_OPENAI
-                    else "Google Gemini"
-                )
+                "provider": {
+                    PROVIDER_OPENAI: "OpenAI",
+                    PROVIDER_PERSONAPLEX: "fal.ai PersonaPlex",
+                }.get(selected_provider, "Google Gemini")
             },
         )
 

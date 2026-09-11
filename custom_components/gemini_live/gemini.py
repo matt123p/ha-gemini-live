@@ -47,10 +47,14 @@ class _GeminiConnect:
             model=config.model,
             config=_gemini_config(config),
         )
+        self._support_barge_in = config.support_barge_in
         self._session: GeminiLiveSession | None = None
 
     async def __aenter__(self) -> GeminiLiveSession:
-        self._session = GeminiLiveSession(await self._context.__aenter__())
+        self._session = GeminiLiveSession(
+            await self._context.__aenter__(),
+            support_barge_in=self._support_barge_in,
+        )
         return self._session
 
     async def __aexit__(self, *exc: Any) -> None:
@@ -60,8 +64,9 @@ class _GeminiConnect:
 class GeminiLiveSession:
     """Translate Gemini SDK calls and responses to the neutral contract."""
 
-    def __init__(self, session: Any) -> None:
+    def __init__(self, session: Any, support_barge_in: bool = False) -> None:
         self._session = session
+        self._support_barge_in = support_barge_in
 
     @property
     def is_open(self) -> bool:
@@ -101,41 +106,61 @@ class GeminiLiveSession:
         )
 
     async def receive(self) -> AsyncIterator[LiveEvent]:
-        async for response in self._session.receive():
-            if response.tool_call:
-                yield LiveEvent(
-                    tool_calls=[
-                        LiveToolCall(
-                            name=call.name or "",
-                            call_id=call.id,
-                            arguments=_escape_decode(call.args or {}),
-                        )
-                        for call in response.tool_call.function_calls or []
-                    ]
-                )
-
-            content = response.server_content
-            if content:
-                if content.model_turn:
-                    for part in content.model_turn.parts or []:
-                        if part.text:
-                            yield LiveEvent(text=part.text)
-                        if part.inline_data and part.inline_data.data:
-                            yield LiveEvent(audio=part.inline_data.data)
-                if content.output_transcription and content.output_transcription.text:
+        while True:
+            interrupted_turn = False
+            receive_next_turn = False
+            async for response in self._session.receive():
+                if response.tool_call:
                     yield LiveEvent(
-                        output_transcript=content.output_transcription.text
+                        tool_calls=[
+                            LiveToolCall(
+                                name=call.name or "",
+                                call_id=call.id,
+                                arguments=_escape_decode(call.args or {}),
+                            )
+                            for call in response.tool_call.function_calls or []
+                        ]
                     )
-                if content.input_transcription and content.input_transcription.text:
-                    yield LiveEvent(input_transcript=content.input_transcription.text)
-                if content.turn_complete:
-                    yield LiveEvent(turn_complete=True)
 
-            if response.go_away or response.session_resumption_update:
-                yield LiveEvent(
-                    go_away=response.go_away,
-                    session_resumption_update=response.session_resumption_update,
-                )
+                content = response.server_content
+                if content:
+                    if content.model_turn:
+                        for part in content.model_turn.parts or []:
+                            if part.text:
+                                yield LiveEvent(text=part.text)
+                            if part.inline_data and part.inline_data.data:
+                                yield LiveEvent(audio=part.inline_data.data)
+                    if content.output_transcription and content.output_transcription.text:
+                        yield LiveEvent(
+                            output_transcript=content.output_transcription.text
+                        )
+                    if content.input_transcription and content.input_transcription.text:
+                        yield LiveEvent(input_transcript=content.input_transcription.text)
+
+                    interrupted = bool(getattr(content, "interrupted", False))
+                    if interrupted:
+                        interrupted_turn = True
+                    if content.turn_complete and interrupted_turn:
+                        # The SDK ends each receive() iterator at turn_complete.
+                        # Re-enter it so the replacement response can arrive.
+                        receive_next_turn = self._support_barge_in
+                    if interrupted or content.turn_complete:
+                        # A single server message may carry both flags; one
+                        # normalized event keeps interrupted processed before the
+                        # consumer decides whether turn_complete is terminal.
+                        yield LiveEvent(
+                            interrupted=interrupted,
+                            turn_complete=bool(content.turn_complete),
+                        )
+
+                if response.go_away or response.session_resumption_update:
+                    yield LiveEvent(
+                        go_away=response.go_away,
+                        session_resumption_update=response.session_resumption_update,
+                    )
+
+            if not receive_next_turn:
+                break
 
 
 def _gemini_config(config: LiveConfig) -> dict[str, Any]:
@@ -152,6 +177,17 @@ def _gemini_config(config: LiveConfig) -> dict[str, Any]:
             "turn_coverage": "TURN_INCLUDES_ONLY_ACTIVITY"
         },
     }
+    if config.support_barge_in:
+        # START_OF_ACTIVITY_INTERRUPTS is Gemini's barge-in mode: new user
+        # speech interrupts the current generation. Set explicitly so the
+        # behaviour is deterministic and tied to the configuration option.
+        result["realtime_input_config"] = {
+            "automatic_activity_detection": {
+                "disabled": False,
+            },
+            "activity_handling": "START_OF_ACTIVITY_INTERRUPTS",
+            "turn_coverage": "TURN_INCLUDES_ONLY_ACTIVITY",
+        }
     if config.transcribe_output:
         result["output_audio_transcription"] = {}
     if config.tools:

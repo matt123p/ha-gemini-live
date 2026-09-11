@@ -12,6 +12,7 @@ CONF_TRANSCRIBE_GEMINI = "transcribe_gemini"
 CONF_TRANSCRIBE_GPT = "transcribe_gpt"
 CONF_ENCOURAGE_WEB_SEARCH = "encourage_web_search"
 CONF_SHOW_TEXT = "show_text"
+CONF_SUPPORT_BARGE_IN = "support_barge_in"
 
 DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
 DEFAULT_VOICE = "Puck"
@@ -19,8 +20,10 @@ DEFAULT_TRANSCRIBE_GEMINI = False
 DEFAULT_TRANSCRIBE_GPT = False
 DEFAULT_ENCOURAGE_WEB_SEARCH = False
 DEFAULT_SHOW_TEXT = True
+DEFAULT_SUPPORT_BARGE_IN = False
 PROVIDER_GEMINI = "gemini"
 PROVIDER_OPENAI = "openai"
+PROVIDER_PERSONAPLEX = "personaplex"
 GEMINI_LIVE_TTS_PLACEHOLDER = "-- gemini live --"
 DEFAULT_SYSTEM_INSTRUCTION = (
     "You are a helpful, concise voice assistant for the user's smart home, powered by Home Assistant. "
@@ -62,6 +65,16 @@ OPENAI_AVAILABLE_VOICES_INFO: list[tuple[str, str]] = [
     ("sage", "Calm and composed"),
     ("shimmer", "Bright and energetic"),
     ("verse", "Versatile and natural"),
+]
+
+PERSONAPLEX_DEFAULT_MODEL = "fal-ai/personaplex/realtime"
+PERSONAPLEX_AVAILABLE_MODELS = [PERSONAPLEX_DEFAULT_MODEL]
+PERSONAPLEX_DEFAULT_VOICE = "NATF2"
+PERSONAPLEX_AVAILABLE_VOICES_INFO: list[tuple[str, str]] = [
+    *( (f"NATF{i}", "Natural female") for i in range(4) ),
+    *( (f"NATM{i}", "Natural male") for i in range(4) ),
+    *( (f"VARF{i}", "Variety female") for i in range(5) ),
+    *( (f"VARM{i}", "Variety male") for i in range(5) ),
 ]
 
 # Languages supported by Gemini native audio models.

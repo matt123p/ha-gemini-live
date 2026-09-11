@@ -2,6 +2,12 @@
 
 All notable changes to Gemini Live for Home Assistant are documented here.
 
+## Unreleased
+
+- Preserve the 24-to-16 kHz resampler phase across provider audio packets and
+  remove per-packet warning logs, preventing discontinuities and bursty
+  playback during long streamed responses.
+
 ## 1.0.7
 
 - Encourage Gemini Live and OpenAI GPT Realtime to call `show_text` before

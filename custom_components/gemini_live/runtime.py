@@ -53,6 +53,33 @@ class AudioStream:
             self._finished = True
             self._queue.put_nowait(None)
 
+    def interrupt(self) -> None:
+        """Discard queued audio without ending the stream.
+
+        Removes PCM that Home Assistant has not consumed yet so a replacement
+        response can follow in the same stream. Unlike finish() this keeps the
+        stream open and does not trigger the cancellation callback.
+        """
+        if self._finished:
+            return
+
+        discarded_chunks = 0
+        discarded_bytes = 0
+        while True:
+            try:
+                chunk = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if chunk is not None:
+                discarded_chunks += 1
+                discarded_bytes += len(chunk)
+        if discarded_chunks:
+            _LOGGER.debug(
+                "Interrupted audio stream: discarded %d queued chunks (%d bytes)",
+                discarded_chunks,
+                discarded_bytes,
+            )
+
     async def async_chunks(self) -> AsyncGenerator[bytes]:
         """Yield buffered and future PCM chunks."""
         consumed = False
