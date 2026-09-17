@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 from gemini_live.gemini import GeminiLiveClient, GeminiLiveSession, _gemini_config
-from gemini_live.live import LiveConfig, LiveEvent
+from gemini_live.live import LiveConfig, LiveEvent, LiveTool
 
 
 def _make_config(**overrides) -> LiveConfig:
@@ -103,6 +103,55 @@ def test_gemini_config_barge_in_does_not_change_other_settings():
     for key in legacy:
         if key != "realtime_input_config":
             assert legacy[key] == barge_in[key]
+
+
+def test_gemini_config_legacy_tools_have_no_behaviour():
+    config = _gemini_config(
+        _make_config(
+            model="gemini-3.1-flash-live-preview",
+            tools=[LiveTool("my_tool", "does things", {"type": "object"})],
+        )
+    )
+
+    declaration = config["tools"][0]["function_declarations"][0]
+    assert "behavior" not in declaration
+
+
+def test_gemini_config_38_live_tools_opt_into_blocking_behaviour():
+    config = _gemini_config(
+        _make_config(
+            model="gemini-3.8-live",
+            tools=[LiveTool("my_tool", "does things", {"type": "object"})],
+        )
+    )
+
+    declaration = config["tools"][0]["function_declarations"][0]
+    assert declaration["behavior"] == "BLOCKING"
+    assert declaration["parameters"] == {
+        "type": "OBJECT",
+        "properties": {"json": {"type": "STRING"}},
+        "required": [],
+    }
+
+
+def test_gemini_config_affective_dialog_only_for_38_models():
+    enabled = _gemini_config(
+        _make_config(model="gemini-3.8-live", affective_dialog=True)
+    )
+    assert enabled["proactivity"] == {"enable_affective_dialog": True}
+
+    disabled = _gemini_config(
+        _make_config(model="gemini-3.8-live", affective_dialog=False)
+    )
+    assert "proactivity" not in disabled
+
+    unsupported = _gemini_config(
+        _make_config(
+            model="gemini-3.1-flash-live-preview",
+            affective_dialog=True,
+        )
+    )
+    assert "proactivity" not in unsupported
 
 
 async def test_gemini_interrupted_event_is_normalized():

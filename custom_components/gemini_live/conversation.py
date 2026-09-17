@@ -18,6 +18,7 @@ from .gemini import GeminiLiveClient, async_create_gemini_client
 from .live import LiveConfig, LiveTool, LiveToolResponse
 from .const import (
     CONF_API_KEY,
+    CONF_AFFECTIVE_DIALOG,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
     CONF_PROVIDER,
@@ -26,6 +27,7 @@ from .const import (
     CONF_TRANSCRIBE_GPT,
     CONF_SHOW_TEXT,
     CONF_VOICE,
+    DEFAULT_AFFECTIVE_DIALOG,
     DEFAULT_SYSTEM_INSTRUCTION,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_TRANSCRIBE_GEMINI,
@@ -257,6 +259,9 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
             system_instruction=system_instruction,
             tools=live_tools,
             transcribe_output=True,
+            affective_dialog=bool(
+                config.get(CONF_AFFECTIVE_DIALOG, DEFAULT_AFFECTIVE_DIALOG)
+            ),
         )
 
         text_response_parts: list[str] = []

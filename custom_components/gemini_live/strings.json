@@ -22,7 +22,8 @@
           "transcribe_gpt": "Transcribe GPT",
           "encourage_web_search": "Encourage web search",
           "show_text": "Show text",
-          "support_barge_in": "Support barge-in"
+          "support_barge_in": "Support barge-in",
+          "affective_dialog": "Affective dialog"
         },
         "data_description": {
           "api_key": "Audio, text, Home Assistant tool schemas, and tool results are sent to the selected provider.",
@@ -34,7 +35,8 @@
           "transcribe_gpt": "Stream GPT's spoken-response transcript into Home Assistant. Disabling this gives the lowest reply-audio latency.",
           "encourage_web_search": "Tell the model to use an exposed search-like Assist tool for current or explicitly requested online information.",
           "show_text": "Expose show_text so the model can display formatted text when response transcription is off.",
-          "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage."
+          "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage.",
+          "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 3.8 models."
         }
       },
       "reconfigure": {
@@ -50,10 +52,12 @@
           "transcribe_gpt": "Transcribe GPT",
           "encourage_web_search": "Encourage web search",
           "show_text": "Show text",
-          "support_barge_in": "Support barge-in"
+          "support_barge_in": "Support barge-in",
+          "affective_dialog": "Affective dialog"
         },
         "data_description": {
-          "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage."
+          "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage.",
+          "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 3.8 models."
         }
       }
     },
@@ -76,10 +80,12 @@
           "transcribe_gpt": "Transcribe GPT",
           "encourage_web_search": "Encourage web search",
           "show_text": "Show text",
-          "support_barge_in": "Support barge-in"
+          "support_barge_in": "Support barge-in",
+          "affective_dialog": "Affective dialog"
         },
         "data_description": {
-          "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage."
+          "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage.",
+          "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 3.8 models."
         }
       }
     }

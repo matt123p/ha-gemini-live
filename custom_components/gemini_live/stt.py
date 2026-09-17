@@ -37,6 +37,7 @@ from .gemini import GeminiLiveClient, async_create_gemini_client
 from .live import LiveConfig, LiveTool, LiveToolResponse
 from .const import (
     CONF_API_KEY,
+    CONF_AFFECTIVE_DIALOG,
     CONF_DETAILED_LOGGING,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
@@ -47,6 +48,7 @@ from .const import (
     CONF_TRANSCRIBE_GEMINI,
     CONF_TRANSCRIBE_GPT,
     CONF_VOICE,
+    DEFAULT_AFFECTIVE_DIALOG,
     DEFAULT_SUPPORT_BARGE_IN,
     DEFAULT_TRANSCRIBE_GEMINI,
     DEFAULT_TRANSCRIBE_GPT,
@@ -583,6 +585,11 @@ class LiveModelSTT(SpeechToTextEntity):
             tools=live_tools,
             transcribe_output=transcribe_output,
             support_barge_in=support_barge_in,
+            affective_dialog=bool(
+                {**self.entry.data, **self.entry.options}.get(
+                    CONF_AFFECTIVE_DIALOG, DEFAULT_AFFECTIVE_DIALOG
+                )
+            ),
         )
 
         _LOGGER.warning(
@@ -627,6 +634,13 @@ class LiveModelSTT(SpeechToTextEntity):
         )
         response_audio_resampler = PCM24kTo16kStreamResampler()
         response_text_stream = TextStream() if transcribe_output else None
+
+        # The placeholder must carry the turn id: Home Assistant caches TTS
+        # audio by message, so a bare placeholder would make later turns
+        # replay the first turn's audio. The same string is used for the
+        # published turn's user_text and the STT transcript so the voice-turn
+        # lookup still matches.
+        fallback_user_text = f"{self.tts_placeholder} {turn_id}"
 
         _LOGGER.warning(
             "[turn=%s] acquiring live-model session conversation=%s",
@@ -914,7 +928,7 @@ class LiveModelSTT(SpeechToTextEntity):
                                 )
                             audio_response_chunk_count += 1
                             audio_response_bytes += len(response.audio)
-                            response_audio_stream.add_chunk(
+                            await response_audio_stream.add_chunk(
                                 response_audio_resampler.process(response.audio)
                             )
                             first_audio.set()
@@ -968,14 +982,30 @@ class LiveModelSTT(SpeechToTextEntity):
                                     turn_id,
                                 )
                                 continue
+                            await response_audio_stream.add_chunk(
+                                response_audio_resampler.flush()
+                            )
+                            if support_barge_in and first_audio.is_set():
+                                # The provider turn is complete, but Home
+                                # Assistant's pipeline run is still open and
+                                # the response may still be playing on the
+                                # satellite. End this response's audio so the
+                                # pipeline can finish its TTS stage, but keep
+                                # forwarding the microphone and receiving
+                                # events so the user can speak again while the
+                                # pipeline is open.
+                                _LOGGER.debug(
+                                    "[turn=%s] turnComplete; keeping the microphone open until the pipeline closes (audio_chunks=%d)",
+                                    turn_id,
+                                    audio_response_chunk_count,
+                                )
+                                response_audio_stream.finish()
+                                continue
                             _LOGGER.warning(
                                 "[turn=%s] turnComplete received; breaking receive loop (audio_chunks=%d text_parts=%d)",
                                 turn_id,
                                 audio_response_chunk_count,
                                 len(text_response_parts),
-                            )
-                            response_audio_stream.add_chunk(
-                                response_audio_resampler.flush()
                             )
                             break
                 except asyncio.CancelledError:
@@ -1013,7 +1043,7 @@ class LiveModelSTT(SpeechToTextEntity):
 
                 user_text = (
                     "".join(input_transcript_parts).strip()
-                    or self.tts_placeholder
+                    or fallback_user_text
                 )
                 # HA persistently caches TTS audio by message. A per-turn message
                 # prevents it from replaying an earlier live-model audio stream.
@@ -1057,11 +1087,32 @@ class LiveModelSTT(SpeechToTextEntity):
             if not support_barge_in:
                 cancel_on_reply_task = asyncio.create_task(_cancel_sender_on_reply())
             try:
-                done, _pending = await asyncio.wait(
-                    [send_task, receive_task],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for completed_task in done:
+                done: set[asyncio.Task[Any]] = set()
+                while not done:
+                    remaining = RESPONSE_INACTIVITY_TIMEOUT - (
+                        time.monotonic() - last_response_activity
+                    )
+                    if remaining <= 0:
+                        _LOGGER.warning(
+                            "[turn=%s] cancelling receive task after %.1fs without response activity",
+                            turn_id,
+                            RESPONSE_INACTIVITY_TIMEOUT,
+                        )
+                        receive_task.cancel()
+                        try:
+                            await receive_task
+                        except asyncio.CancelledError:
+                            pass
+                        break
+                    done, _pending = await asyncio.wait(
+                        [send_task, receive_task],
+                        timeout=remaining,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+
+                for completed_task in (send_task, receive_task):
+                    if not completed_task.done():
+                        continue
                     try:
                         completed_task.result()
                     except asyncio.CancelledError:
@@ -1081,15 +1132,28 @@ class LiveModelSTT(SpeechToTextEntity):
                             await send_task
                         except asyncio.CancelledError:
                             pass
+                elif not audio_sent:
+                    receive_task.cancel()
+                    try:
+                        await receive_task
+                    except asyncio.CancelledError:
+                        pass
+                    return SpeechResult(None, SpeechResultState.ERROR)
+                elif support_barge_in:
+                    # The microphone stream ended: Home Assistant closed it at
+                    # the end of the pipeline run, so the provider turn is
+                    # over. Keep listening for the whole run rather than
+                    # stopping at turnComplete.
+                    _LOGGER.debug(
+                        "[turn=%s] microphone stream closed by pipeline; ending provider turn",
+                        turn_id,
+                    )
+                    receive_task.cancel()
+                    try:
+                        await receive_task
+                    except asyncio.CancelledError:
+                        pass
                 else:
-                    if not audio_sent:
-                        receive_task.cancel()
-                        try:
-                            await receive_task
-                        except asyncio.CancelledError:
-                            pass
-                        return SpeechResult(None, SpeechResultState.ERROR)
-
                     while not receive_task.done():
                         remaining = RESPONSE_INACTIVITY_TIMEOUT - (
                             time.monotonic() - last_response_activity
@@ -1158,8 +1222,10 @@ class LiveModelSTT(SpeechToTextEntity):
 
         final_text = input_transcript or response_text
         if first_audio.is_set():
+            # Must match the user_text published with the streaming turn so
+            # the conversation agent's voice-turn lookup succeeds.
             return SpeechResult(
-                input_transcript or self.tts_placeholder,
+                input_transcript or fallback_user_text,
                 SpeechResultState.SUCCESS,
             )
         if not final_text:
@@ -1182,7 +1248,7 @@ class LiveModelSTT(SpeechToTextEntity):
                     conversation_id=conversation_id,
                     user_text=final_text,
                     assistant_text=(
-                        assistant_text or self.tts_placeholder
+                        assistant_text or fallback_user_text
                     ),
                     audio=b"",
                     complete_conversation=conversation_complete,

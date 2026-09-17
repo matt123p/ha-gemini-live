@@ -17,6 +17,7 @@ from gemini_live.const import (
     CONF_TRANSCRIBE_GEMINI,
     CONF_TRANSCRIBE_GPT,
     DOMAIN,
+    GEMINI_LIVE_TTS_PLACEHOLDER,
     GEMINI_SESSION_MANAGER_KEY,
     GEMINI_TURN_STORE_KEY,
 )
@@ -130,8 +131,13 @@ class MicStream:
 class ScriptedSession:
     """A LiveSession double whose receive() follows a scripted flow."""
 
-    def __init__(self, support_barge_in: bool) -> None:
+    def __init__(
+        self,
+        support_barge_in: bool,
+        include_input_transcript: bool = True,
+    ) -> None:
         self.support_barge_in = support_barge_in
+        self.include_input_transcript = include_input_transcript
         self.sent_audio: list[bytes] = []
         self.end_audio_count = 0
         self.reply_started = asyncio.Event()
@@ -153,7 +159,8 @@ class ScriptedSession:
     async def receive(self):
         if self.support_barge_in:
             self.reply_started.set()
-            yield LiveEvent(input_transcript="user request")
+            if self.include_input_transcript:
+                yield LiveEvent(input_transcript="user request")
             yield LiveEvent(
                 audio=AUDIO_A,
                 output_transcript="interrupted transcript",
@@ -165,6 +172,9 @@ class ScriptedSession:
                 output_transcript="replacement transcript",
             )
             yield LiveEvent(turn_complete=True)
+            # A real session stays open for further user activity until the
+            # pipeline closes the microphone stream.
+            await asyncio.Event().wait()
         else:
             self.reply_started.set()
             yield LiveEvent(
@@ -302,8 +312,19 @@ async def test_barge_in_keeps_microphone_forwarding_after_reply(
 
     # Let the provider interrupt the response and emit its replacement.
     session.release_gate.set()
-    result = await asyncio.wait_for(run_task, 15)
+    await asyncio.sleep(0.1)
+
+    # The provider turn is complete now, but the pipeline is still open:
+    # microphone chunks must keep flowing so the user can speak again.
+    after_reply = len(session.sent_audio)
+    for _ in range(EXTRA_MIC_CHUNKS):
+        mic.put(MIC_CHUNK)
+    await _wait_until(lambda: len(session.sent_audio) >= after_reply + EXTRA_MIC_CHUNKS)
+
+    # The pipeline closing the microphone stream is what ends the turn.
     mic.close()
+    result = await asyncio.wait_for(run_task, 15)
+    assert session.end_audio_count == 1
     assert result.text
     assert result.result is SpeechResultState.SUCCESS
 
@@ -383,6 +404,7 @@ async def test_legacy_mode_stops_microphone_forwarding_after_reply(
 @pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
 async def test_barge_in_drops_provider_transcript_when_transcription_disabled(
     entity_class,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Do not expose an unsolicited provider transcript when disabled."""
     hass = FakeHass()
@@ -400,6 +422,13 @@ async def test_barge_in_drops_provider_transcript_when_transcription_disabled(
     session = ScriptedSession(support_barge_in=True)
     scripted_client = ScriptedClient(session)
     _bind_client(entity, scripted_client)
+
+    # The full entry point resolves the pipeline conversation ID through Home
+    # Assistant; pin it so the published turn can be looked up below.
+    monkeypatch.setattr(
+        "gemini_live.stt.active_pipeline_context",
+        lambda *_args, **_kwargs: ("conversation-1", None),
+    )
 
     mic = MicStream()
     process_task = asyncio.create_task(
@@ -423,3 +452,62 @@ async def test_barge_in_drops_provider_transcript_when_transcription_disabled(
     assert turn is not None
     assert turn.assistant_text_stream is None
     assert "transcript" not in turn.assistant_text
+
+
+@pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
+async def test_placeholder_transcript_carries_unique_turn_id(
+    entity_class,
+) -> None:
+    """A missing input transcript must still yield a unique STT output.
+
+    Home Assistant caches TTS audio by message, so the bare placeholder
+    would make later turns replay the first turn's audio. The STT transcript
+    must also match the published voice turn's user_text exactly so the
+    conversation agent finds it.
+    """
+    hass = FakeHass()
+    entry_data = {
+        "api_key": "k",
+        CONF_SUPPORT_BARGE_IN: True,
+    }
+    entity, _session_manager, turn_store = _make_entity(hass, entry_data, entity_class)
+    session = ScriptedSession(
+        support_barge_in=True,
+        include_input_transcript=False,
+    )
+    scripted_client = ScriptedClient(session)
+    _bind_client(entity, scripted_client)
+
+    mic = MicStream()
+    result_future: asyncio.Future = asyncio.Future()
+
+    run_task = asyncio.create_task(
+        entity._async_run_audio_stream_sdk(
+            _metadata(),
+            mic.chunks(),
+            "k",
+            "m",
+            "v",
+            "",
+            True,
+            False,
+            False,
+            True,
+            result_future,
+            "conversation-1",
+            None,
+        )
+    )
+
+    mic.put(MIC_CHUNK)
+    await asyncio.wait_for(session.reply_started.wait(), 5)
+    mic.close()
+    result = await asyncio.wait_for(run_task, 15)
+
+    assert result.text.startswith(GEMINI_LIVE_TTS_PLACEHOLDER)
+    assert result.text != GEMINI_LIVE_TTS_PLACEHOLDER
+
+    turn = turn_store.take_voice_turn("conversation-1", result.text)
+    assert turn is not None
+    assert turn.assistant_text.startswith(GEMINI_LIVE_TTS_PLACEHOLDER)
+    assert turn.assistant_text != GEMINI_LIVE_TTS_PLACEHOLDER

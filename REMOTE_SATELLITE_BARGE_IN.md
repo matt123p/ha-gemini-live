@@ -15,8 +15,13 @@ The integration and live-model provider handle:
 - continuously receiving microphone PCM while the model speaks;
 - detecting user activity with provider-side VAD;
 - cancelling the interrupted model response;
-- discarding assistant audio still queued inside Home Assistant; and
-- streaming replacement response audio through the existing TTS stream.
+- discarding assistant audio still queued inside Home Assistant;
+- streaming replacement response audio through the existing TTS stream;
+- keeping the session listening for the whole pipeline run: microphone audio is
+  forwarded until Home Assistant closes the stream, not only until the model's
+  turn completes; and
+- bounding the audio buffered between the provider and Home Assistant to a few
+  hundred milliseconds, so an interruption discards very little unplayed audio.
 
 The remote satellite must handle:
 
@@ -98,6 +103,28 @@ Use a short speech-start debounce to avoid clicks causing interruption, but keep
 it small enough that the interaction still feels immediate. The provider
 remains authoritative about whether generation is actually cancelled.
 
+## Integration-side listening lifecycle
+
+With barge-in enabled, the integration negotiates external-VAD-free audio
+processing so Home Assistant keeps the STT stream open for the entire pipeline
+run. The provider turn is tied to that stream:
+
+- microphone chunks are forwarded to the provider for as long as Home
+  Assistant keeps the stream open;
+- when the provider reports `turn_complete`, only the current response's audio
+  is finalized (so the pipeline's TTS stage can complete); receiving and
+  microphone forwarding continue;
+- the provider turn ends when Home Assistant closes the microphone stream at
+  the end of the run; and
+- a follow-up pipeline run reuses the same provider session, so the model keeps
+  its conversation context across runs.
+
+Because response audio is buffered ahead of Home Assistant by at most a few
+hundred milliseconds, an interruption discards almost all queued output at the
+integration boundary. Audio already handed to Home Assistant's media pipeline
+or the satellite cannot be recalled, which is why local playback purging below
+is still required.
+
 ## Playback cancellation
 
 On local speech start while speaking:
@@ -173,6 +200,12 @@ Suggested starting targets:
 | Speech-start debounce | 40–100 ms |
 | Playback purge after speech start | Under 50 ms |
 | Post-speech stale-audio guard | 0–100 ms, tune experimentally |
+| Integration response audio buffer | ~200 ms (fixed, with backpressure) |
+
+The integration-side buffer is deliberately small: the live-session receive
+loop pauses when the consumer has not claimed enough audio, so only a few
+hundred milliseconds of response audio ever sit queued where an interruption
+can cancel it.
 
 Smaller buffers improve interruption responsiveness but increase sensitivity to
 network jitter and scheduling delays. Measure on the actual hardware rather
@@ -198,6 +231,8 @@ Test with response transcription both enabled and disabled.
 - Real speech during playback changes the display to `LISTENING` immediately.
 - Old queued playback is inaudible after interruption.
 - Microphone transmission continues throughout the interruption.
+- Speech that starts after the model's turn completes but before the pipeline
+  run ends is still forwarded to the provider.
 - The display changes to `PROCESSING` when the user stops speaking.
 - Replacement audio changes the display back to `SPEAKING`.
 - Replacement audio is not clipped by the stale-audio guard.

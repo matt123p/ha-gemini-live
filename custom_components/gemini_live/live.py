@@ -26,6 +26,7 @@ class LiveConfig:
     tools: list[LiveTool] = field(default_factory=list)
     transcribe_output: bool = True
     support_barge_in: bool = False
+    affective_dialog: bool = False
 
 
 @dataclass(slots=True)

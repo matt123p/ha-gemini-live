@@ -15,22 +15,22 @@ def _make_config(**overrides) -> LiveConfig:
 
 async def test_interrupt_discards_queued_audio_and_keeps_stream_open():
     stream = AudioStream()
-    stream.add_chunk(b"old-a")
-    stream.add_chunk(b"old-b")
+    await stream.add_chunk(b"old-a")
+    await stream.add_chunk(b"old-b")
 
     stream.interrupt()
 
     consumer = asyncio.create_task(anext(stream.async_chunks()))
-    stream.add_chunk(b"new")
+    await stream.add_chunk(b"new")
     assert await asyncio.wait_for(consumer, 1) == b"new"
 
 
 async def test_interrupted_stream_delivers_only_replacement_audio():
     stream = AudioStream()
-    stream.add_chunk(b"a1")
-    stream.add_chunk(b"a2")
+    await stream.add_chunk(b"a1")
+    await stream.add_chunk(b"a2")
     stream.interrupt()
-    stream.add_chunk(b"b1")
+    await stream.add_chunk(b"b1")
     stream.finish()
 
     chunks = [chunk async for chunk in stream.async_chunks()]
@@ -39,9 +39,9 @@ async def test_interrupted_stream_delivers_only_replacement_audio():
 
 async def test_interrupt_is_not_finish():
     stream = AudioStream()
-    stream.add_chunk(b"a")
+    await stream.add_chunk(b"a")
     stream.interrupt()
-    stream.add_chunk(b"b")
+    await stream.add_chunk(b"b")
 
     consumer = asyncio.create_task(anext(stream.async_chunks()))
     assert await asyncio.wait_for(consumer, 1) == b"b"
@@ -67,7 +67,7 @@ async def test_interrupt_after_finish_keeps_end_of_stream_sentinel():
 async def test_interrupt_does_not_invoke_cancellation_callback():
     cancel_calls = []
     stream = AudioStream(lambda: cancel_calls.append(True))
-    stream.add_chunk(b"a")
+    await stream.add_chunk(b"a")
     stream.interrupt()
     stream.finish()
 
@@ -76,16 +76,71 @@ async def test_interrupt_does_not_invoke_cancellation_callback():
     assert cancel_calls == []
 
 
+async def test_interrupt_notifies_subscribers():
+    stream = AudioStream()
+    interruptions = []
+    unsubscribe = stream.subscribe_interrupt(lambda: interruptions.append(True))
+
+    stream.interrupt()
+    unsubscribe()
+    stream.interrupt()
+
+    assert interruptions == [True]
+
+
 async def test_abandoned_stream_still_invokes_cancellation_callback():
     cancel_calls = []
     stream = AudioStream(lambda: cancel_calls.append(True))
-    stream.add_chunk(b"a")
+    await stream.add_chunk(b"a")
     stream.finish()
 
     generator = stream.async_chunks()
     assert await anext(generator) == b"a"
     await generator.aclose()
     assert cancel_calls == [True]
+
+
+async def test_add_chunk_pauses_producer_when_buffer_is_full():
+    stream = AudioStream(max_buffer_bytes=4)
+    await stream.add_chunk(b"aaaa")
+
+    # The producer must wait instead of racing ahead of the consumer.
+    producer = asyncio.create_task(stream.add_chunk(b"b"))
+    await asyncio.sleep(0.01)
+    assert not producer.done()
+
+    consumer = asyncio.create_task(anext(stream.async_chunks()))
+    assert await asyncio.wait_for(consumer, 1) == b"aaaa"
+    await asyncio.wait_for(producer, 1)
+
+
+async def test_interrupt_unblocks_paused_producer_and_queues_replacement_audio():
+    stream = AudioStream(max_buffer_bytes=4)
+    await stream.add_chunk(b"old!")
+    producer = asyncio.create_task(stream.add_chunk(b"new!"))
+    await asyncio.sleep(0.01)
+    assert not producer.done()
+
+    stream.interrupt()
+    await asyncio.wait_for(producer, 1)
+    stream.finish()
+
+    chunks = [chunk async for chunk in stream.async_chunks()]
+    assert chunks == [b"new!"]
+
+
+async def test_finish_unblocks_paused_producer_without_queuing_its_chunk():
+    stream = AudioStream(max_buffer_bytes=4)
+    await stream.add_chunk(b"kept")
+    producer = asyncio.create_task(stream.add_chunk(b"drop"))
+    await asyncio.sleep(0.01)
+    assert not producer.done()
+
+    stream.finish()
+    await asyncio.wait_for(producer, 1)
+
+    chunks = [chunk async for chunk in stream.async_chunks()]
+    assert chunks == [b"kept"]
 
 
 def test_config_signature_changes_when_barge_in_toggles():

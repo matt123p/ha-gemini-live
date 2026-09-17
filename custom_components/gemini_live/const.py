@@ -13,6 +13,7 @@ CONF_TRANSCRIBE_GPT = "transcribe_gpt"
 CONF_ENCOURAGE_WEB_SEARCH = "encourage_web_search"
 CONF_SHOW_TEXT = "show_text"
 CONF_SUPPORT_BARGE_IN = "support_barge_in"
+CONF_AFFECTIVE_DIALOG = "affective_dialog"
 
 DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
 DEFAULT_VOICE = "Puck"
@@ -21,6 +22,7 @@ DEFAULT_TRANSCRIBE_GPT = False
 DEFAULT_ENCOURAGE_WEB_SEARCH = False
 DEFAULT_SHOW_TEXT = True
 DEFAULT_SUPPORT_BARGE_IN = False
+DEFAULT_AFFECTIVE_DIALOG = False
 PROVIDER_GEMINI = "gemini"
 PROVIDER_OPENAI = "openai"
 PROVIDER_PERSONAPLEX = "personaplex"
@@ -42,9 +44,22 @@ OPENAI_SYSTEM_INSTRUCTION = (
 )
 
 AVAILABLE_MODELS = [
+    "gemini-3.8-live",
     "gemini-3.1-flash-live-preview",
     "gemini-2.5-flash-native-audio-preview-12-2025",
 ]
+
+# Model generations that expose the affective-dialog setting. Affective
+# dialog lets the model read the tone and emotion in the user's voice and
+# adapt its own speaking style to match.
+AFFECTIVE_DIALOG_MODEL_PREFIXES = ("gemini-3.8",)
+
+
+def supports_affective_dialog(model: str | None) -> bool:
+    """Return whether a model supports the affective-dialog setting."""
+    if not model:
+        return False
+    return model.startswith(AFFECTIVE_DIALOG_MODEL_PREFIXES)
 
 OPENAI_DEFAULT_MODEL = "gpt-realtime-2.1"
 OPENAI_DEFAULT_VOICE = "marin"

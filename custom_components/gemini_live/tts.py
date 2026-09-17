@@ -16,6 +16,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     CONF_PROVIDER,
+    CONF_SUPPORT_BARGE_IN,
     DOMAIN,
     GEMINI_TURN_STORE_KEY,
     PROVIDER_GEMINI,
@@ -62,6 +63,8 @@ class GeminiLiveTTS(TextToSpeechEntity):
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize the TTS entity."""
         self.entry = entry
+        config = {**entry.data, **entry.options}
+        self._support_barge_in = bool(config.get(CONF_SUPPORT_BARGE_IN, False))
         self._attr_name = self.integration_name
         self._attr_unique_id = f"{entry.entry_id}_tts"
 
@@ -130,11 +133,26 @@ class GeminiLiveTTS(TextToSpeechEntity):
                         pass
 
                 drain_task = asyncio.create_task(drain_message_stream())
+                unsubscribe_interrupt = None
+                if (
+                    self._support_barge_in
+                    and (
+                        on_audio_interrupt := getattr(
+                            request, "on_audio_interrupt", None
+                        )
+                    )
+                    is not None
+                ):
+                    unsubscribe_interrupt = audio.subscribe_interrupt(
+                        on_audio_interrupt
+                    )
                 try:
                     yield streaming_wav_header()
                     async for chunk in audio.async_chunks():
                         yield chunk
                 finally:
+                    if unsubscribe_interrupt is not None:
+                        unsubscribe_interrupt()
                     await drain_task
                 return
             if audio:
@@ -147,7 +165,10 @@ class GeminiLiveTTS(TextToSpeechEntity):
             message[:80] if message else "(none)",
             isinstance(audio, AudioStream),
         )
-        return TTSAudioResponse("wav", data_gen())
+        response = TTSAudioResponse("wav", data_gen())
+        if self._support_barge_in and hasattr(response, "passthrough"):
+            response.passthrough = True
+        return response
 
     def _get_dummy_wav(self) -> bytes:
         """Return 1 second of silence as 16kHz mono 16-bit PCM WAV."""

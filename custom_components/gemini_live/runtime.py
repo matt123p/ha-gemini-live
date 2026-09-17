@@ -20,6 +20,13 @@ from .live import LiveClient, LiveConfig, LiveSession
 
 _LOGGER = logging.getLogger(__name__)
 
+# Upper bound for audio buffered between the live model and Home Assistant's
+# TTS consumer (~200 ms of 16 kHz 16-bit mono PCM). Keeping this small means a
+# barge-in interruption discards very little unplayed audio, so the assistant
+# stops quickly. The producer is paused while the buffer is full instead of
+# racing ahead of playback.
+AUDIO_STREAM_MAX_BUFFER_BYTES = 6400
+
 
 @dataclass(slots=True)
 class PipelineTurn:
@@ -34,24 +41,54 @@ class PipelineTurn:
 
 
 class AudioStream:
-    """Buffer one live-model audio response for the TTS stage."""
+    """Buffer one live-model audio response for the TTS stage.
 
-    def __init__(self, on_cancel: Callable[[], None] | None = None) -> None:
+    The buffer is deliberately small. The producer (the live-session receive
+    loop) pauses in ``add_chunk`` whenever the consumer has not yet claimed
+    enough audio, so only a few hundred milliseconds of output ever sit
+    queued. On barge-in, ``interrupt`` can therefore cancel the response
+    before much stale audio has been handed to Home Assistant's media
+    pipeline. There is a single producer per stream.
+    """
+
+    def __init__(
+        self,
+        on_cancel: Callable[[], None] | None = None,
+        max_buffer_bytes: int = AUDIO_STREAM_MAX_BUFFER_BYTES,
+    ) -> None:
         """Initialize an audio stream."""
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._finished = False
         self._on_cancel = on_cancel
+        self._max_buffer_bytes = max(1, max_buffer_bytes)
+        self._buffered_bytes = 0
+        self._can_produce = asyncio.Event()
+        self._can_produce.set()
+        self._interrupt_callbacks: set[Callable[[], None]] = set()
 
-    def add_chunk(self, chunk: bytes) -> None:
-        """Add one PCM audio chunk."""
-        if chunk and not self._finished:
-            self._queue.put_nowait(chunk)
+    async def add_chunk(self, chunk: bytes) -> None:
+        """Add one PCM audio chunk, pausing while the buffer is full.
+
+        Backpressure keeps the queued output small so a barge-in
+        interruption discards little audio and Home Assistant stops
+        playback almost immediately.
+        """
+        if not chunk or self._finished:
+            return
+        while self._buffered_bytes >= self._max_buffer_bytes and not self._finished:
+            self._can_produce.clear()
+            await self._can_produce.wait()
+        if self._finished:
+            return
+        self._buffered_bytes += len(chunk)
+        self._queue.put_nowait(chunk)
 
     def finish(self) -> None:
         """Signal that no more audio chunks will arrive."""
         if not self._finished:
             self._finished = True
             self._queue.put_nowait(None)
+            self._can_produce.set()
 
     def interrupt(self) -> None:
         """Discard queued audio without ending the stream.
@@ -63,6 +100,9 @@ class AudioStream:
         if self._finished:
             return
 
+        for callback in tuple(self._interrupt_callbacks):
+            callback()
+
         discarded_chunks = 0
         discarded_bytes = 0
         while True:
@@ -73,6 +113,8 @@ class AudioStream:
             if chunk is not None:
                 discarded_chunks += 1
                 discarded_bytes += len(chunk)
+        self._buffered_bytes = 0
+        self._can_produce.set()
         if discarded_chunks:
             _LOGGER.debug(
                 "Interrupted audio stream: discarded %d queued chunks (%d bytes)",
@@ -80,11 +122,23 @@ class AudioStream:
                 discarded_bytes,
             )
 
+    def subscribe_interrupt(self, callback: Callable[[], None]) -> Callable[[], None]:
+        """Subscribe to discontinuities in the streamed response audio."""
+        self._interrupt_callbacks.add(callback)
+
+        def unsubscribe() -> None:
+            self._interrupt_callbacks.discard(callback)
+
+        return unsubscribe
+
     async def async_chunks(self) -> AsyncGenerator[bytes]:
         """Yield buffered and future PCM chunks."""
         consumed = False
         try:
             while (chunk := await self._queue.get()) is not None:
+                self._buffered_bytes -= len(chunk)
+                if self._buffered_bytes < self._max_buffer_bytes:
+                    self._can_produce.set()
                 yield chunk
             consumed = True
         finally:

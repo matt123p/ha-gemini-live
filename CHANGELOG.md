@@ -2,11 +2,29 @@
 
 All notable changes to Gemini Live for Home Assistant are documented here.
 
-## Unreleased
+## 1.0.8
 
+- Barge-in now keeps listening for the whole pipeline run: microphone audio
+  continues to be forwarded after the model finishes a turn, so the user can
+  interrupt while a response is still playing, and a follow-up run reuses the
+  same provider session.
+- Bound the response audio buffered between the live model and Home Assistant
+  to roughly 200 milliseconds with producer backpressure, so a barge-in
+  interruption discards almost all queued output and playback stops quickly.
 - Preserve the 24-to-16 kHz resampler phase across provider audio packets and
   remove per-packet warning logs, preventing discontinuities and bursty
   playback during long streamed responses.
+- Added `gemini-3.8-live` as a model choice. Tool declarations sent to it pin
+  synchronous (blocking) function calling, preserving the integration's
+  request/execute/respond flow on models that default to asynchronous
+  execution.
+- Added an Affective dialog switch for Gemini 3.8 models. When enabled, the
+  model reads the tone and emotion in the user's voice and adapts its own
+  speaking style to match. The switch is hidden for models that do not
+  support it.
+- Embedded the unique per-turn id in the pipeline placeholder whenever no
+  input transcript is available, so Home Assistant's TTS message cache can no
+  longer replay an earlier turn's audio.
 
 ## 1.0.7
 

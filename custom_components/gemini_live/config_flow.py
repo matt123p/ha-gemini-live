@@ -11,6 +11,7 @@ from .const import (
     AVAILABLE_MODELS,
     AVAILABLE_VOICES_INFO,
     CONF_API_KEY,
+    CONF_AFFECTIVE_DIALOG,
     CONF_DETAILED_LOGGING,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
@@ -21,6 +22,7 @@ from .const import (
     CONF_TRANSCRIBE_GEMINI,
     CONF_TRANSCRIBE_GPT,
     CONF_VOICE,
+    DEFAULT_AFFECTIVE_DIALOG,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_MODEL,
     DEFAULT_SHOW_TEXT,
@@ -40,6 +42,7 @@ from .const import (
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
     PROVIDER_PERSONAPLEX,
+    supports_affective_dialog,
 )
 
 PROVIDER_SELECTOR = selector.SelectSelector(
@@ -158,6 +161,21 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
             ),
         ): selector.BooleanSelector(),
     }
+    # The affective-dialog switch is Gemini-specific and only rendered for
+    # models that support it; Home Assistant config forms cannot render a
+    # disabled field, so it is hidden instead.
+    if (
+        not is_openai
+        and not is_personaplex
+        and supports_affective_dialog(current.get(CONF_MODEL))
+    ):
+        fields[vol.Optional(
+            CONF_AFFECTIVE_DIALOG,
+            default=current.get(
+                CONF_AFFECTIVE_DIALOG,
+                DEFAULT_AFFECTIVE_DIALOG,
+            ),
+        )] = selector.BooleanSelector()
     if is_personaplex:
         # PersonaPlex currently has no function-calling, display-text tool, or
         # explicit VAD event surface in its public realtime API.
@@ -165,6 +183,13 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
             marker = next(marker for marker in fields if marker.schema == key)
             del fields[marker]
     return vol.Schema(fields)
+
+
+def _strip_unsupported_settings(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Drop model-specific settings the selected model does not support."""
+    if not supports_affective_dialog(user_input.get(CONF_MODEL)):
+        user_input.pop(CONF_AFFECTIVE_DIALOG, None)
+    return user_input
 
 
 class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -200,6 +225,7 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         selected_provider = provider or self.context[CONF_PROVIDER]
         self.context[CONF_PROVIDER] = selected_provider
         if user_input is not None:
+            user_input = _strip_unsupported_settings(user_input)
             user_input[CONF_PROVIDER] = selected_provider
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
             title = {
@@ -224,6 +250,7 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config = {**entry.data, **entry.options}
         provider = _provider(config)
         if user_input is not None:
+            user_input = _strip_unsupported_settings(user_input)
             user_input[CONF_PROVIDER] = provider
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
             return self.async_update_reload_and_abort(
@@ -253,6 +280,7 @@ class GeminiLiveOptionsFlowHandler(config_entries.OptionsFlow):
         config = {**self.config_entry.data, **self.config_entry.options}
         provider = _provider(config)
         if user_input is not None:
+            user_input = _strip_unsupported_settings(user_input)
             user_input[CONF_PROVIDER] = provider
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
             return self.async_create_entry(title="", data=user_input)

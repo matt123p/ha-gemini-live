@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from typing import Any
 
+from .const import supports_affective_dialog
 from .live import LiveConfig, LiveEvent, LiveTool, LiveToolCall, LiveToolResponse
 
 _SUPPORTED_SCHEMA_KEYS = {
@@ -21,6 +22,19 @@ _SUPPORTED_SCHEMA_KEYS = {
     "required",
     "items",
 }
+
+# Model generations whose default function-calling mode is asynchronous
+# (NON_BLOCKING). The integration executes tools synchronously inside its
+# receive loop, so its tool declarations must opt back into BLOCKING
+# behaviour on these models.
+_ASYNC_FUNCTION_CALLING_MODEL_PREFIXES = ("gemini-3.8",)
+
+
+def _uses_async_function_calling(model: str | None) -> bool:
+    """Return whether a model defaults to asynchronous function calling."""
+    if not model:
+        return False
+    return model.startswith(_ASYNC_FUNCTION_CALLING_MODEL_PREFIXES)
 
 
 async def async_create_gemini_client(hass: Any, api_key: str) -> GeminiLiveClient:
@@ -190,19 +204,29 @@ def _gemini_config(config: LiveConfig) -> dict[str, Any]:
         }
     if config.transcribe_output:
         result["output_audio_transcription"] = {}
+    if supports_affective_dialog(config.model) and config.affective_dialog:
+        # Let the model read the tone and emotion in the user's voice and
+        # adapt its own speaking style to match.
+        result["proactivity"] = {"enable_affective_dialog": True}
     if config.tools:
+        blocking = _uses_async_function_calling(config.model)
         result["tools"] = [
-            {"function_declarations": [_gemini_tool(tool)]}
+            {"function_declarations": [_gemini_tool(tool, blocking)]}
             for tool in config.tools
         ]
     return result
 
 
-def _gemini_tool(tool: LiveTool) -> dict[str, Any]:
+def _gemini_tool(tool: LiveTool, blocking: bool = False) -> dict[str, Any]:
     declaration: dict[str, Any] = {
         "name": tool.name,
         "description": tool.description,
     }
+    if blocking:
+        # Keep synchronous tool execution on models that default to
+        # asynchronous function calling: the integration awaits each tool
+        # result and sends it before the model continues.
+        declaration["behavior"] = "BLOCKING"
     if tool.parameters:
         declaration["parameters"] = _gemini_schema(tool.parameters)
     return declaration
