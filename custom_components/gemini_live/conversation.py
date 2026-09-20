@@ -252,6 +252,7 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
         """Send typed text to the live model and cache its audio for TTS."""
         turn_id = uuid4().hex[:8]
         show_text_content: str | None = None
+        conversation_ended = False
         started_at = time.monotonic()
         config = {**self.entry.data, **self.entry.options}
         api_key = config.get(CONF_API_KEY)
@@ -340,6 +341,7 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                                 )
 
                                 if tool_name == END_CONVERSATION_TOOL_NAME:
+                                    conversation_ended = True
                                     session_manager.complete_conversation(
                                         conversation_id
                                     )
@@ -430,8 +432,20 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
             assistant_text = "".join(text_response_parts)
 
         if not assistant_text:
-            _LOGGER.error("[turn=%s] live-model text path returned no usable text", turn_id)
-            return None
+            if conversation_ended:
+                # The model ended the conversation via the end_conversation
+                # tool without producing any text; that is a normal outcome.
+                _LOGGER.debug(
+                    "[turn=%s] live-model ended conversation without text",
+                    turn_id,
+                )
+                assistant_text = f"{self.tts_placeholder} {turn_id}"
+            else:
+                _LOGGER.error(
+                    "[turn=%s] live-model text path returned no usable text",
+                    turn_id,
+                )
+                return None
 
         turn_store.add_audio(assistant_text, wav_data)
 
