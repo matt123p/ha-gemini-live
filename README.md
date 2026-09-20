@@ -70,6 +70,7 @@ Gemini Live can be used side-by-side with the official integration.
 | Microphone audio | Streamed directly into a Gemini Live session | Uses the normal Assist pipeline before the conversation agent |
 | Spoken reply | Native audio returned by the same Live session | Provides a standalone Google Gemini TTS entity |
 | Home control | Calls the Home Assistant Assist LLM API tools | Can control Home Assistant through configured LLM APIs |
+| Barge-in | Experimental; supported with the required Home Assistant Core interrupt path and a compatible full-duplex satellite | Not provided by the integration |
 | Typed conversation | Supported (but not recommended - use the offical Gemini integration instead) | Supported |
 | Standalone TTS | Not supported - Use the offical Gemini integration instead | Supported with `tts.speak`, including voice options |
 | Image/PDF analysis | Not supported - Use the offical Gemini integration instead | Supported by the `generate_content` action |
@@ -112,6 +113,10 @@ Before installing, you need:
 - An Assist-capable voice device, browser, or companion app if you want to use
   voice input and playback.
 - Entities and scripts exposed to Assist if you want the model to control them.
+
+For current language support, see the provider documentation for
+[Gemini Live](https://ai.google.dev/gemini-api/docs/live-api/capabilities#supported-languages)
+and [OpenAI audio](https://developers.openai.com/api/docs/guides/text-to-speech#supported-languages).
 
 Review Google's current
 [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing),
@@ -187,10 +192,17 @@ upgrade to the latest version.
 | Transcribe Gemini / GPT | Streams the model's spoken-response transcript into Home Assistant while native audio is still arriving. Disabled by default for the lowest playback latency. |
 | Encourage web search | Encourages the model to use an exposed search-like Assist tool for current, recent, time-sensitive, or explicitly requested online information. Disabled by default. |
 | Show text | Exposes a callback function so the model can display formatted text/markdown in the Home Assistant chat UI instead of the default placeholder. Only active when response transcription is disabled. Enabled by default. |
-| Support barge-in | Experimental: keeps microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback (acoustic echo cancellation is strongly recommended, otherwise the assistant may hear itself and self-interrupt), and uses smaller input chunks (~40 ms) for lower interruption latency. Does not change the response-transcription setting. Disabled by default. |
+| Support barge-in | Experimental: keeps microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires the Home Assistant Core interrupt path and a compatible full-duplex voice client or satellite. Disabled by default. |
 
-Remote-device authors should follow the
-[remote satellite barge-in implementation guide](REMOTE_SATELLITE_BARGE_IN.md).
+> [!WARNING]
+> Barge-in support is experimental. A standard Assist satellite will not work:
+> it must continue sending microphone audio during speaker playback and respond
+> to Home Assistant's playback-interrupt signal. Acoustic echo cancellation
+> must support double-talk so the assistant does not hear and interrupt itself.
+> For an ESPHome implementation, see
+> [esphome-aec](https://github.com/matt123p/esphome-aec). See the
+> [remote satellite barge-in guide](REMOTE_SATELLITE_BARGE_IN.md) for the full
+> Home Assistant Core and satellite requirements.
 
 To change the options later, open **Settings > Devices & services**, select
 **Gemini Live**, and select **Configure** or **Reconfigure**.
@@ -274,47 +286,6 @@ does not install, expose, or configure a search tool by itself.
 When **Transcribe Gemini** is turned off (which is recommended for the fastest voice responses), Gemini's spoken reply is normally hidden in the Home Assistant chat UI and only the placeholder `-- gemini live --` is displayed.
 
 If you are using a device with a screen (like a wall tablet, phone, or browser), you can enable the **Show text** option. When enabled, if Gemini decides to give you a detailed list, instructions, links, or code blocks that are better read than listened to, it will display them in the chat UI as formatted text while still speaking to you. If it only has a simple spoken reply, it will continue to show the default placeholder.
-
-## Supported Audio And Languages
-
-The STT entity accepts WAV audio containing 16-bit, 16 kHz, mono PCM. This is
-the format used by a compatible Home Assistant Assist pipeline. Gemini's 24 kHz
-native response audio is converted to 16 kHz PCM and streamed through the TTS
-stage as it arrives. When **Transcribe Gemini** is enabled, Home Assistant also
-streams transcript text into TTS and starts playback after its built-in
-streaming threshold is reached. Short transcribed replies may therefore wait
-until their transcript is complete. Disabling the option starts playback from
-the first available audio with only the configured user-transcript wait.
-
-The integration advertises all 78 languages currently listed as supported by
-Gemini's native audio models:
-
-| | | | |
-| --- | --- | --- | --- |
-| Afrikaans (`af`) | Albanian (`sq`) | Amharic (`am`) | Arabic (`ar`) |
-| Armenian (`hy`) | Azerbaijani (`az`) | Bangla (`bn`) | Basque (`eu`) |
-| Belarusian (`be`) | Bulgarian (`bg`) | Burmese (`my`) | Catalan (`ca`) |
-| Cebuano (`ceb`) | Chinese, Mandarin (`cmn`) | Croatian (`hr`) | Czech (`cs`) |
-| Danish (`da`) | Dutch (`nl`) | English (`en`) | Estonian (`et`) |
-| Filipino (`fil`) | Finnish (`fi`) | French (`fr`) | Galician (`gl`) |
-| Georgian (`ka`) | German (`de`) | Greek (`el`) | Gujarati (`gu`) |
-| Haitian Creole (`ht`) | Hebrew (`he`) | Hindi (`hi`) | Hungarian (`hu`) |
-| Icelandic (`is`) | Indonesian (`id`) | Italian (`it`) | Japanese (`ja`) |
-| Javanese (`jv`) | Kannada (`kn`) | Konkani (`kok`) | Korean (`ko`) |
-| Lao (`lo`) | Latin (`la`) | Latvian (`lv`) | Lithuanian (`lt`) |
-| Luxembourgish (`lb`) | Macedonian (`mk`) | Maithili (`mai`) | Malagasy (`mg`) |
-| Malay (`ms`) | Malayalam (`ml`) | Marathi (`mr`) | Mongolian (`mn`) |
-| Nepali (`ne`) | Norwegian, Bokmal (`nb`) | Norwegian, Nynorsk (`nn`) | Odia (`or`) |
-| Pashto (`ps`) | Persian (`fa`) | Polish (`pl`) | Portuguese (`pt`) |
-| Punjabi (`pa`) | Romanian (`ro`) | Russian (`ru`) | Serbian (`sr`) |
-| Sindhi (`sd`) | Sinhala (`si`) | Slovak (`sk`) | Slovenian (`sl`) |
-| Spanish (`es`) | Swahili (`sw`) | Swedish (`sv`) | Tamil (`ta`) |
-| Telugu (`te`) | Thai (`th`) | Turkish (`tr`) | Ukrainian (`uk`) |
-| Urdu (`ur`) | Vietnamese (`vi`) | | |
-
-Gemini detects the spoken language automatically. `en-US` is also advertised
-as a Home Assistant compatibility alias for English. See Google's current
-[supported language list](https://ai.google.dev/gemini-api/docs/speech-generation#supported-languages).
 
 ## Privacy And Security
 
