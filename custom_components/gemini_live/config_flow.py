@@ -7,18 +7,19 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
+from .compat import supports_tts_interruption
 from .const import (
     AVAILABLE_MODELS,
     AVAILABLE_VOICES_INFO,
-    CONF_API_KEY,
     CONF_AFFECTIVE_DIALOG,
+    CONF_API_KEY,
     CONF_DETAILED_LOGGING,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
     CONF_PROVIDER,
     CONF_SHOW_TEXT,
-    CONF_SYSTEM_INSTRUCTION,
     CONF_SUPPORT_BARGE_IN,
+    CONF_SYSTEM_INSTRUCTION,
     CONF_TRANSCRIBE_GEMINI,
     CONF_TRANSCRIBE_GPT,
     CONF_VOICE,
@@ -192,6 +193,13 @@ def _strip_unsupported_settings(user_input: dict[str, Any]) -> dict[str, Any]:
     return user_input
 
 
+def _barge_in_errors(user_input: dict[str, Any]) -> dict[str, str]:
+    """Reject barge-in when Core cannot propagate an interruption."""
+    if user_input.get(CONF_SUPPORT_BARGE_IN) and not supports_tts_interruption():
+        return {"base": "barge_in_unsupported"}
+    return {}
+
+
 class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Configure a Gemini Live or GPT Realtime provider."""
 
@@ -226,6 +234,18 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.context[CONF_PROVIDER] = selected_provider
         if user_input is not None:
             user_input = _strip_unsupported_settings(user_input)
+            if errors := _barge_in_errors(user_input):
+                return self.async_show_form(
+                    step_id="provider",
+                    data_schema=_provider_schema(selected_provider, user_input),
+                    errors=errors,
+                    description_placeholders={
+                        "provider": {
+                            PROVIDER_OPENAI: "OpenAI",
+                            PROVIDER_PERSONAPLEX: "fal.ai PersonaPlex",
+                        }.get(selected_provider, "Google Gemini")
+                    },
+                )
             user_input[CONF_PROVIDER] = selected_provider
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
             title = {
@@ -251,6 +271,12 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         provider = _provider(config)
         if user_input is not None:
             user_input = _strip_unsupported_settings(user_input)
+            if errors := _barge_in_errors(user_input):
+                return self.async_show_form(
+                    step_id="reconfigure",
+                    data_schema=_provider_schema(provider, user_input),
+                    errors=errors,
+                )
             user_input[CONF_PROVIDER] = provider
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
             return self.async_update_reload_and_abort(
@@ -281,6 +307,12 @@ class GeminiLiveOptionsFlowHandler(config_entries.OptionsFlow):
         provider = _provider(config)
         if user_input is not None:
             user_input = _strip_unsupported_settings(user_input)
+            if errors := _barge_in_errors(user_input):
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=_provider_schema(provider, user_input),
+                    errors=errors,
+                )
             user_input[CONF_PROVIDER] = provider
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
             return self.async_create_entry(title="", data=user_input)

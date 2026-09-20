@@ -3,10 +3,10 @@
 from typing import Any
 
 import voluptuous as vol
-from gemini_live.config_flow import _provider_schema
+from gemini_live.config_flow import _barge_in_errors, _provider_schema
 from gemini_live.const import (
-    CONF_API_KEY,
     CONF_AFFECTIVE_DIALOG,
+    CONF_API_KEY,
     CONF_MODEL,
     CONF_SUPPORT_BARGE_IN,
     CONF_VOICE,
@@ -66,6 +66,20 @@ def test_barge_in_setting_persists_through_reconfigure() -> None:
         )
 
         assert result[CONF_SUPPORT_BARGE_IN] is True
+
+
+def test_barge_in_requires_core_interruption_support(
+    monkeypatch,
+) -> None:
+    """Reject enabling barge-in unless Core has the complete interrupt path."""
+    monkeypatch.setattr(
+        "gemini_live.config_flow.supports_tts_interruption", lambda: False
+    )
+
+    assert _barge_in_errors({CONF_SUPPORT_BARGE_IN: True}) == {
+        "base": "barge_in_unsupported"
+    }
+    assert _barge_in_errors({CONF_SUPPORT_BARGE_IN: False}) == {}
 
 
 def test_affective_dialog_only_shown_for_supported_models() -> None:

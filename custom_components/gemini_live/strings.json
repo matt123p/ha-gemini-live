@@ -63,6 +63,9 @@
     },
     "abort": {
       "reconfigure_successful": "The live model was reconfigured successfully."
+    },
+    "error": {
+      "barge_in_unsupported": "Barge-in requires Home Assistant Core with TTS interruption support. Install a compatible Core build or disable barge-in."
     }
   },
   "options": {
@@ -88,6 +91,9 @@
           "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 3.8 models."
         }
       }
+    },
+    "error": {
+      "barge_in_unsupported": "Barge-in requires Home Assistant Core with TTS interruption support. Install a compatible Core build or disable barge-in."
     }
   },
   "issues": {

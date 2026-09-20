@@ -1,16 +1,20 @@
 """Live voice-model integration for Gemini and OpenAI."""
 
 import logging
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryError
 
+from . import conversation, stt, tts  # noqa: F401
+from .compat import supports_tts_interruption
 from .const import (
     CONF_DETAILED_LOGGING,
+    CONF_SUPPORT_BARGE_IN,
     DOMAIN,
     GEMINI_SESSION_MANAGER_KEY,
     GEMINI_TURN_STORE_KEY,
 )
-from . import stt, tts, conversation
 from .runtime import LiveSessionManager, TurnStore
 from .utils import set_detailed_logging
 
@@ -18,9 +22,13 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up a live voice-model provider from a config entry."""
-    hass.data.setdefault(DOMAIN, {})
-
     config = {**entry.data, **entry.options}
+    if config.get(CONF_SUPPORT_BARGE_IN) and not supports_tts_interruption():
+        raise ConfigEntryError(
+            "Barge-in requires Home Assistant Core TTS interruption support"
+        )
+
+    hass.data.setdefault(DOMAIN, {})
     set_detailed_logging(bool(config.get(CONF_DETAILED_LOGGING, False)))
 
     # Store configuration data (merging data and options)
