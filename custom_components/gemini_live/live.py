@@ -27,6 +27,8 @@ class LiveConfig:
     transcribe_output: bool = True
     support_barge_in: bool = False
     affective_dialog: bool = False
+    search_grounding: bool = False
+    thinking_level: str | None = None
 
 
 @dataclass(slots=True)

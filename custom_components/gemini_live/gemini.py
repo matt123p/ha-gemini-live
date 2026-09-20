@@ -7,7 +7,11 @@ from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from typing import Any
 
-from .const import supports_affective_dialog
+from .const import (
+    DEFAULT_THINKING_LEVEL,
+    EXTENDED_THINKING_MODEL,
+    supports_affective_dialog,
+)
 from .live import LiveConfig, LiveEvent, LiveTool, LiveToolCall, LiveToolResponse
 
 _SUPPORTED_SCHEMA_KEYS = {
@@ -62,12 +66,14 @@ class _GeminiConnect:
             config=_gemini_config(config),
         )
         self._support_barge_in = config.support_barge_in
+        self._extended_thinking = config.model == EXTENDED_THINKING_MODEL
         self._session: GeminiLiveSession | None = None
 
     async def __aenter__(self) -> GeminiLiveSession:
         self._session = GeminiLiveSession(
             await self._context.__aenter__(),
             support_barge_in=self._support_barge_in,
+            extended_thinking=self._extended_thinking,
         )
         return self._session
 
@@ -78,9 +84,15 @@ class _GeminiConnect:
 class GeminiLiveSession:
     """Translate Gemini SDK calls and responses to the neutral contract."""
 
-    def __init__(self, session: Any, support_barge_in: bool = False) -> None:
+    def __init__(
+        self,
+        session: Any,
+        support_barge_in: bool = False,
+        extended_thinking: bool = False,
+    ) -> None:
         self._session = session
         self._support_barge_in = support_barge_in
+        self._extended_thinking = extended_thinking
 
     @property
     def is_open(self) -> bool:
@@ -124,6 +136,8 @@ class GeminiLiveSession:
             interrupted_turn = False
             receive_next_turn = False
             async for response in self._session.receive():
+                interaction_status = _interaction_status(response)
+                interaction_in_progress = interaction_status == "IN_PROGRESS"
                 if response.tool_call:
                     yield LiveEvent(
                         tool_calls=[
@@ -154,17 +168,24 @@ class GeminiLiveSession:
                     interrupted = bool(getattr(content, "interrupted", False))
                     if interrupted:
                         interrupted_turn = True
-                    if content.turn_complete and interrupted_turn:
+                    if content.turn_complete and (
+                        interrupted_turn or interaction_in_progress
+                    ):
                         # The SDK ends each receive() iterator at turn_complete.
                         # Re-enter it so the replacement response can arrive.
-                        receive_next_turn = self._support_barge_in
-                    if interrupted or content.turn_complete:
+                        receive_next_turn = (
+                            self._support_barge_in or self._extended_thinking
+                        )
+                    terminal_turn = bool(content.turn_complete) and not (
+                        self._extended_thinking and interaction_in_progress
+                    )
+                    if interrupted or terminal_turn:
                         # A single server message may carry both flags; one
                         # normalized event keeps interrupted processed before the
                         # consumer decides whether turn_complete is terminal.
                         yield LiveEvent(
                             interrupted=interrupted,
-                            turn_complete=bool(content.turn_complete),
+                            turn_complete=terminal_turn,
                         )
 
                 if response.go_away or response.session_resumption_update:
@@ -208,28 +229,50 @@ def _gemini_config(config: LiveConfig) -> dict[str, Any]:
         # Let the model read the tone and emotion in the user's voice and
         # adapt its own speaking style to match.
         result["proactivity"] = {"enable_affective_dialog": True}
+    if config.model == EXTENDED_THINKING_MODEL:
+        result["thinking_config"] = {
+            "thinking_level": config.thinking_level or DEFAULT_THINKING_LEVEL
+        }
+    if config.search_grounding:
+        result.setdefault("tools", []).append({"google_search": {}})
     if config.tools:
-        blocking = _uses_async_function_calling(config.model)
-        result["tools"] = [
-            {"function_declarations": [_gemini_tool(tool, blocking)]}
+        behavior = (
+            "NON_BLOCKING"
+            if config.model == EXTENDED_THINKING_MODEL
+            else "BLOCKING" if _uses_async_function_calling(config.model) else None
+        )
+        result.setdefault("tools", []).extend(
+            {"function_declarations": [_gemini_tool(tool, behavior)]}
             for tool in config.tools
-        ]
+        )
     return result
 
 
-def _gemini_tool(tool: LiveTool, blocking: bool = False) -> dict[str, Any]:
+def _gemini_tool(
+    tool: LiveTool, behavior: str | None = None
+) -> dict[str, Any]:
     declaration: dict[str, Any] = {
         "name": tool.name,
         "description": tool.description,
     }
-    if blocking:
-        # Keep synchronous tool execution on models that default to
-        # asynchronous function calling: the integration awaits each tool
-        # result and sends it before the model continues.
-        declaration["behavior"] = "BLOCKING"
+    if behavior:
+        # Standard 3.8 sessions retain the integration's synchronous tool
+        # flow. Extended Thinking requires non-blocking declarations.
+        declaration["behavior"] = behavior
     if tool.parameters:
         declaration["parameters"] = _gemini_schema(tool.parameters)
     return declaration
+
+
+def _interaction_status(response: Any) -> str | None:
+    """Normalize an SDK interaction-status enum or string."""
+    status = getattr(response, "interaction_status", None)
+    if status is None and (content := getattr(response, "server_content", None)):
+        status = getattr(content, "interaction_status", None)
+    if status is None:
+        return None
+    value = getattr(status, "value", status)
+    return str(value).rsplit(".", 1)[-1].upper()
 
 
 def _gemini_schema(schema: dict[str, Any]) -> dict[str, Any]:

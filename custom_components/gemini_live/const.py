@@ -11,6 +11,8 @@ CONF_DETAILED_LOGGING = "detailed_logging"
 CONF_TRANSCRIBE_GEMINI = "transcribe_gemini"
 CONF_TRANSCRIBE_GPT = "transcribe_gpt"
 CONF_ENCOURAGE_WEB_SEARCH = "encourage_web_search"
+CONF_SEARCH_GROUNDING = "search_grounding"
+CONF_THINKING_LEVEL = "thinking_level"
 CONF_SHOW_TEXT = "show_text"
 CONF_SUPPORT_BARGE_IN = "support_barge_in"
 CONF_AFFECTIVE_DIALOG = "affective_dialog"
@@ -20,6 +22,8 @@ DEFAULT_VOICE = "Puck"
 DEFAULT_TRANSCRIBE_GEMINI = False
 DEFAULT_TRANSCRIBE_GPT = False
 DEFAULT_ENCOURAGE_WEB_SEARCH = False
+DEFAULT_SEARCH_GROUNDING = False
+DEFAULT_THINKING_LEVEL = "low"
 DEFAULT_SHOW_TEXT = True
 DEFAULT_SUPPORT_BARGE_IN = False
 DEFAULT_AFFECTIVE_DIALOG = False
@@ -45,21 +49,30 @@ OPENAI_SYSTEM_INSTRUCTION = (
 
 AVAILABLE_MODELS = [
     "gemini-3.8-live",
+    "gemini-3.8-live-extended-thinking",
     "gemini-3.1-flash-live-preview",
     "gemini-2.5-flash-native-audio-preview-12-2025",
 ]
 
+EXTENDED_THINKING_MODEL = "gemini-3.8-live-extended-thinking"
+THINKING_LEVELS = ["low", "medium", "high"]
+
+
+def supports_thinking_level(model: str | None) -> bool:
+    """Return whether a model exposes configurable background reasoning."""
+    return model == EXTENDED_THINKING_MODEL
+
 # Model generations that expose the affective-dialog setting. Affective
 # dialog lets the model read the tone and emotion in the user's voice and
 # adapt its own speaking style to match.
-AFFECTIVE_DIALOG_MODEL_PREFIXES = ("gemini-3.8",)
+AFFECTIVE_DIALOG_MODELS = {"gemini-3.8-live"}
 
 
 def supports_affective_dialog(model: str | None) -> bool:
     """Return whether a model supports the affective-dialog setting."""
     if not model:
         return False
-    return model.startswith(AFFECTIVE_DIALOG_MODEL_PREFIXES)
+    return model in AFFECTIVE_DIALOG_MODELS
 
 OPENAI_DEFAULT_MODEL = "gpt-realtime-2.1"
 OPENAI_DEFAULT_VOICE = "marin"

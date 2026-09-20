@@ -4,6 +4,15 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Added `gemini-3.8-live-extended-thinking`, including its asynchronous tool
+  declarations, configurable low/medium/high thinking level, and
+  multi-utterance interaction lifecycle, and changed model selection to a
+  dropdown. Model-specific settings are hidden when they do not apply.
+- Added optional native Google Search grounding for every available Gemini Live
+  model. This can run alongside Home Assistant Assist function tools and
+  replaces the separate search-agent workaround for Gemini entries. When
+  enabled, the system instruction now explicitly directs Gemini to use Search
+  for current, changing, or explicitly requested online information.
 - Preserve the originating Assist pipeline context for voice-triggered tool
   calls, so Home Assistant can retain satellite and pipeline provenance in
   downstream service calls and Logbook activity. Unavailable or invalid

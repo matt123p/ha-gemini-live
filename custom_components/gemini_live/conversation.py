@@ -22,17 +22,21 @@ from .const import (
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
     CONF_PROVIDER,
+    CONF_SEARCH_GROUNDING,
     CONF_SYSTEM_INSTRUCTION,
+    CONF_THINKING_LEVEL,
     CONF_TRANSCRIBE_GEMINI,
     CONF_TRANSCRIBE_GPT,
     CONF_SHOW_TEXT,
     CONF_VOICE,
     DEFAULT_AFFECTIVE_DIALOG,
     DEFAULT_SYSTEM_INSTRUCTION,
+    DEFAULT_THINKING_LEVEL,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_TRANSCRIBE_GEMINI,
     DEFAULT_TRANSCRIBE_GPT,
     DEFAULT_SHOW_TEXT,
+    DEFAULT_SEARCH_GROUNDING,
     DOMAIN,
     GEMINI_LIVE_TTS_PLACEHOLDER,
     GEMINI_SESSION_MANAGER_KEY,
@@ -92,6 +96,7 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
     default_system_instruction = DEFAULT_SYSTEM_INSTRUCTION
     error_response = "Sorry, I could not get a response from the live model."
     supported_language_codes = SUPPORTED_LANGUAGES
+    supports_search_grounding = False
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the agent."""
@@ -156,9 +161,20 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
         """Load HA Assist tools and the final live-model instruction."""
         config = {**self.entry.data, **self.entry.options}
         custom_instruction = config.get(CONF_SYSTEM_INSTRUCTION, "")
-        encourage_web_search = bool(
-            config.get(CONF_ENCOURAGE_WEB_SEARCH, DEFAULT_ENCOURAGE_WEB_SEARCH)
-        )
+        if self.supports_search_grounding:
+            encourage_web_search = bool(
+                config.get(
+                    CONF_SEARCH_GROUNDING,
+                    DEFAULT_SEARCH_GROUNDING,
+                )
+            )
+        else:
+            encourage_web_search = bool(
+                config.get(
+                    CONF_ENCOURAGE_WEB_SEARCH,
+                    DEFAULT_ENCOURAGE_WEB_SEARCH,
+                )
+            )
         transcribe_output = bool(
             config.get(self.transcribe_config_key, self.default_transcribe)
         )
@@ -184,6 +200,7 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                 system_instruction,
                 llm_api.tools,
                 encourage_web_search,
+                native_search_grounding=self.supports_search_grounding,
             )
             system_instruction = _add_end_conversation_instruction(system_instruction)
             if not transcribe_output and show_text:
@@ -193,7 +210,7 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                 _format_tools_for_live(
                     llm_api.tools,
                     llm_api.custom_serializer,
-                    encourage_web_search,
+                    encourage_web_search and not self.supports_search_grounding,
                 )
             )
             if not transcribe_output and show_text:
@@ -210,6 +227,12 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                 exc,
             )
             live_tools = _add_end_conversation_tool([])
+            system_instruction = _add_search_tool_instruction(
+                system_instruction,
+                [],
+                encourage_web_search,
+                native_search_grounding=self.supports_search_grounding,
+            )
             system_instruction = _add_end_conversation_instruction(system_instruction)
             if not transcribe_output and show_text:
                 system_instruction = _add_show_text_instruction(system_instruction)
@@ -261,6 +284,17 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
             transcribe_output=True,
             affective_dialog=bool(
                 config.get(CONF_AFFECTIVE_DIALOG, DEFAULT_AFFECTIVE_DIALOG)
+            ),
+            search_grounding=bool(
+                self.supports_search_grounding
+                and config.get(
+                    CONF_SEARCH_GROUNDING,
+                    DEFAULT_SEARCH_GROUNDING,
+                )
+            ),
+            thinking_level=config.get(
+                CONF_THINKING_LEVEL,
+                DEFAULT_THINKING_LEVEL,
             ),
         )
 
@@ -513,6 +547,7 @@ class GeminiLiveConversationAgent(LiveModelConversationAgent):
     transcribe_config_key = CONF_TRANSCRIBE_GEMINI
     default_transcribe = DEFAULT_TRANSCRIBE_GEMINI
     error_response = "Sorry, I could not get a response from Gemini Live."
+    supports_search_grounding = True
 
     async def _async_create_client(self, api_key: str) -> GeminiLiveClient:
         """Create the Gemini provider adapter."""

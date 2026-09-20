@@ -17,17 +17,21 @@ from .const import (
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
     CONF_PROVIDER,
+    CONF_SEARCH_GROUNDING,
     CONF_SHOW_TEXT,
     CONF_SUPPORT_BARGE_IN,
     CONF_SYSTEM_INSTRUCTION,
+    CONF_THINKING_LEVEL,
     CONF_TRANSCRIBE_GEMINI,
     CONF_TRANSCRIBE_GPT,
     CONF_VOICE,
     DEFAULT_AFFECTIVE_DIALOG,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_MODEL,
+    DEFAULT_SEARCH_GROUNDING,
     DEFAULT_SHOW_TEXT,
     DEFAULT_SUPPORT_BARGE_IN,
+    DEFAULT_THINKING_LEVEL,
     DEFAULT_TRANSCRIBE_GEMINI,
     DEFAULT_TRANSCRIBE_GPT,
     DEFAULT_VOICE,
@@ -43,7 +47,9 @@ from .const import (
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
     PROVIDER_PERSONAPLEX,
+    THINKING_LEVELS,
     supports_affective_dialog,
+    supports_thinking_level,
 )
 
 PROVIDER_SELECTOR = selector.SelectSelector(
@@ -56,6 +62,16 @@ PROVIDER_SELECTOR = selector.SelectSelector(
         mode=selector.SelectSelectorMode.DROPDOWN,
     )
 )
+
+
+def _model_selector(models: list[str]) -> selector.SelectSelector:
+    """Return a compact dropdown for a provider's model choices."""
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=models,
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
 
 GEMINI_VOICE_SELECTOR = selector.SelectSelector(
     selector.SelectSelectorConfig(
@@ -124,7 +140,7 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
         vol.Required(
             CONF_MODEL,
             default=current.get(CONF_MODEL, default_model),
-        ): vol.In(models),
+        ): _model_selector(models),
         vol.Required(
             CONF_VOICE,
             default=current.get(CONF_VOICE, default_voice),
@@ -144,13 +160,6 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
             default=current.get(transcribe_key, default_transcribe),
         ): selector.BooleanSelector(),
         vol.Optional(
-            CONF_ENCOURAGE_WEB_SEARCH,
-            default=current.get(
-                CONF_ENCOURAGE_WEB_SEARCH,
-                DEFAULT_ENCOURAGE_WEB_SEARCH,
-            ),
-        ): selector.BooleanSelector(),
-        vol.Optional(
             CONF_SHOW_TEXT,
             default=current.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT),
         ): selector.BooleanSelector(),
@@ -162,6 +171,25 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
             ),
         ): selector.BooleanSelector(),
     }
+    if not is_openai and not is_personaplex:
+        # All Gemini Live models offered by this integration support Google's
+        # server-side Search grounding tool. It is a separate, opt-in
+        # preference from the former Assist search-tool prompt hint.
+        fields[vol.Optional(
+            CONF_SEARCH_GROUNDING,
+            default=current.get(
+                CONF_SEARCH_GROUNDING,
+                DEFAULT_SEARCH_GROUNDING,
+            ),
+        )] = selector.BooleanSelector()
+    elif is_openai:
+        fields[vol.Optional(
+            CONF_ENCOURAGE_WEB_SEARCH,
+            default=current.get(
+                CONF_ENCOURAGE_WEB_SEARCH,
+                DEFAULT_ENCOURAGE_WEB_SEARCH,
+            ),
+        )] = selector.BooleanSelector()
     # The affective-dialog switch is Gemini-specific and only rendered for
     # models that support it; Home Assistant config forms cannot render a
     # disabled field, so it is hidden instead.
@@ -177,10 +205,22 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
                 DEFAULT_AFFECTIVE_DIALOG,
             ),
         )] = selector.BooleanSelector()
+    if (
+        not is_openai
+        and not is_personaplex
+        and supports_thinking_level(current.get(CONF_MODEL))
+    ):
+        fields[vol.Optional(
+            CONF_THINKING_LEVEL,
+            default=current.get(
+                CONF_THINKING_LEVEL,
+                DEFAULT_THINKING_LEVEL,
+            ),
+        )] = _model_selector(THINKING_LEVELS)
     if is_personaplex:
         # PersonaPlex currently has no function-calling, display-text tool, or
         # explicit VAD event surface in its public realtime API.
-        for key in (CONF_ENCOURAGE_WEB_SEARCH, CONF_SHOW_TEXT, CONF_SUPPORT_BARGE_IN):
+        for key in (CONF_SHOW_TEXT, CONF_SUPPORT_BARGE_IN):
             marker = next(marker for marker in fields if marker.schema == key)
             del fields[marker]
     return vol.Schema(fields)
@@ -190,7 +230,21 @@ def _strip_unsupported_settings(user_input: dict[str, Any]) -> dict[str, Any]:
     """Drop model-specific settings the selected model does not support."""
     if not supports_affective_dialog(user_input.get(CONF_MODEL)):
         user_input.pop(CONF_AFFECTIVE_DIALOG, None)
+    if not supports_thinking_level(user_input.get(CONF_MODEL)):
+        user_input.pop(CONF_THINKING_LEVEL, None)
     return user_input
+
+
+def _needs_model_specific_refresh(user_input: dict[str, Any]) -> bool:
+    """Return whether a newly selected model needs its settings form shown."""
+    model = user_input.get(CONF_MODEL)
+    return (
+        supports_thinking_level(model)
+        and CONF_THINKING_LEVEL not in user_input
+    ) or (
+        supports_affective_dialog(model)
+        and CONF_AFFECTIVE_DIALOG not in user_input
+    )
 
 
 def _barge_in_errors(user_input: dict[str, Any]) -> dict[str, str]:
@@ -233,6 +287,14 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         selected_provider = provider or self.context[CONF_PROVIDER]
         self.context[CONF_PROVIDER] = selected_provider
         if user_input is not None:
+            if _needs_model_specific_refresh(user_input):
+                return self.async_show_form(
+                    step_id="provider",
+                    data_schema=_provider_schema(selected_provider, user_input),
+                    description_placeholders={
+                        "provider": "Google Gemini",
+                    },
+                )
             user_input = _strip_unsupported_settings(user_input)
             if errors := _barge_in_errors(user_input):
                 return self.async_show_form(
@@ -270,6 +332,11 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config = {**entry.data, **entry.options}
         provider = _provider(config)
         if user_input is not None:
+            if _needs_model_specific_refresh(user_input):
+                return self.async_show_form(
+                    step_id="reconfigure",
+                    data_schema=_provider_schema(provider, user_input),
+                )
             user_input = _strip_unsupported_settings(user_input)
             if errors := _barge_in_errors(user_input):
                 return self.async_show_form(
@@ -306,6 +373,11 @@ class GeminiLiveOptionsFlowHandler(config_entries.OptionsFlow):
         config = {**self.config_entry.data, **self.config_entry.options}
         provider = _provider(config)
         if user_input is not None:
+            if _needs_model_specific_refresh(user_input):
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=_provider_schema(provider, user_input),
+                )
             user_input = _strip_unsupported_settings(user_input)
             if errors := _barge_in_errors(user_input):
                 return self.async_show_form(

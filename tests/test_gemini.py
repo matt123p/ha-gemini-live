@@ -19,6 +19,7 @@ def _server_content(**overrides):
         "input_transcription": None,
         "interrupted": False,
         "turn_complete": False,
+        "interaction_status": None,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -134,6 +135,33 @@ def test_gemini_config_38_live_tools_opt_into_blocking_behaviour():
     }
 
 
+def test_gemini_config_extended_thinking_uses_non_blocking_tools():
+    config = _gemini_config(
+        _make_config(
+            model="gemini-3.8-live-extended-thinking",
+            thinking_level="high",
+            tools=[LiveTool("my_tool", "does things")],
+        )
+    )
+
+    declaration = config["tools"][0]["function_declarations"][0]
+    assert declaration["behavior"] == "NON_BLOCKING"
+    assert config["thinking_config"] == {"thinking_level": "high"}
+
+
+def test_gemini_config_search_grounding_combines_with_function_tools():
+    config = _gemini_config(
+        _make_config(
+            model="gemini-3.8-live",
+            search_grounding=True,
+            tools=[LiveTool("my_tool", "does things")],
+        )
+    )
+
+    assert config["tools"][0] == {"google_search": {}}
+    assert config["tools"][1]["function_declarations"][0]["name"] == "my_tool"
+
+
 def test_gemini_config_affective_dialog_only_for_38_models():
     enabled = _gemini_config(
         _make_config(model="gemini-3.8-live", affective_dialog=True)
@@ -194,6 +222,35 @@ async def test_gemini_plain_turn_complete_remains_terminal_marker():
     events = await _collect(session)
 
     assert events == [LiveEvent(turn_complete=True)]
+
+
+async def test_extended_thinking_waits_until_interaction_is_idle():
+    sdk_session = _TurnBoundedFakeSDKSession(
+        [
+            [
+                _sdk_response(
+                    _server_content(
+                        turn_complete=True,
+                        interaction_status="IN_PROGRESS",
+                    ),
+                )
+            ],
+            [
+                _sdk_response(
+                    _server_content(
+                        turn_complete=True,
+                        interaction_status="IDLE",
+                    ),
+                )
+            ],
+        ]
+    )
+    session = GeminiLiveSession(sdk_session, extended_thinking=True)
+
+    events = await _collect(session)
+
+    assert events == [LiveEvent(turn_complete=True)]
+    assert sdk_session.receive_count == 2
 
 
 async def test_gemini_server_content_without_interrupted_attribute():

@@ -74,8 +74,8 @@ Gemini Live can be used side-by-side with the official integration.
 | Typed conversation | Supported (but not recommended - use the offical Gemini integration instead) | Supported |
 | Standalone TTS | Not supported - Use the offical Gemini integration instead | Supported with `tts.speak`, including voice options |
 | Image/PDF analysis | Not supported - Use the offical Gemini integration instead | Supported by the `generate_content` action |
-| Google Search option | Supported through the official integration's documented search workaround | Supported through the official integration's documented search workaround |
-| Model stability | Uses preview Live models | Offers the models and settings supported by Home Assistant Core |
+| Google Search option | Native Live API Search grounding, enabled per entry | Google Search support for its configured conversation models |
+| Model stability | Includes stable Gemini 3.8 Live models and legacy preview models | Offers the models and settings supported by Home Assistant Core |
 | Support channel | Community repository issues | Home Assistant Core issue tracker and documentation |
 
 ### Recommended: Set Up Both Integrations
@@ -190,9 +190,22 @@ upgrade to the latest version.
 | System instruction | Optional personality and behavior instruction. Home Assistant's Assist API prompt is appended automatically. |
 | Detailed logging | Enables verbose logs from this custom integration. These logs can contain transcripts, model details, and tool-call information. |
 | Transcribe Gemini / GPT | Streams the model's spoken-response transcript into Home Assistant while native audio is still arriving. Disabled by default for the lowest playback latency. |
-| Encourage web search | Encourages the model to use an exposed search-like Assist tool for current, recent, time-sensitive, or explicitly requested online information. Disabled by default. |
+| Google Search grounding | Gemini only. Gives the Live model access to Google's built-in Search tool for current or verifiable web information. Optional and disabled by default. Search use may add Gemini API charges. |
+| Thinking level | Gemini 3.8 Live Extended Thinking only. Choose low, medium, or high background reasoning. Higher levels may improve complex answers while increasing latency and cost. |
+| Encourage web search | OpenAI only. Encourages the model to use an exposed search-like Assist tool. This is a prompt hint, not Gemini Search grounding. Disabled by default. |
 | Show text | Exposes a callback function so the model can display formatted text/markdown in the Home Assistant chat UI instead of the default placeholder. Only active when response transcription is disabled. Enabled by default. |
 | Support barge-in | Experimental: keeps microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires the Home Assistant Core interrupt path and a compatible full-duplex voice client or satellite. Disabled by default. |
+
+For most assistants, choose **Gemini 3.8 Live**: it is optimized for immediate,
+low-latency conversation and direct smart-home commands. Choose **Gemini 3.8
+Live Extended Thinking** for complex planning, multi-step analysis, or slower
+tool workflows. Extended Thinking reasons in the background and may speak brief
+progress updates before its final answer, so it can take longer to finish a
+request. After selecting it, submit the form once to reveal its **Thinking
+level** choice (low, medium, or high). The integration keeps the Home Assistant
+turn open until Gemini reports that the full interaction is idle, rather than
+treating an intermediate spoken update as the final reply. Settings that do not
+apply to the selected model are omitted from the follow-up form.
 
 > [!WARNING]
 > Barge-in support is experimental. A standard Assist satellite will not work:
@@ -254,32 +267,33 @@ what to call and describe the outcome.
 
 ## Enable Google Search
 
-Gemini Live can use the workaround from the official Home Assistant
-[Google Gemini integration's Google Search documentation](https://www.home-assistant.io/integrations/google_generative_ai_conversation/#google-search).
-The official integration is required because it provides a separate
-search-enabled conversation agent for the workaround to call.
+Google's Live API now supports its built-in
+[Google Search grounding tool](https://ai.google.dev/gemini-api/docs/live-api/tools)
+in the same session as function-calling tools. This integration can therefore
+give Gemini current web information while still exposing Home Assistant's
+Assist tools; a second conversation agent, search script, and the official
+integration's older workaround are not required.
 
-This extra agent is necessary because, as the official documentation explains,
-the Gemini API does not allow the
-[Google Search tool](https://ai.google.dev/gemini-api/docs/google-search) and
-function-calling tools such as Home Assistant's Assist tools in the same
-request. The workaround exposes a script that sends search queries to the
-separate official Gemini agent and returns its answer.
+Enable **Google Search grounding** in the Gemini Live integration options. It is
+off by default. When enabled, Gemini decides when a request benefits from Search
+and Google executes the search server-side. The integration also instructs
+Gemini to use Search for current, changing, time-sensitive, or explicitly
+requested online information instead of relying on its training data. This is
+different from exposing a Home Assistant search script: Search grounding is a
+native Gemini tool, needs no entity exposure, and grounds the answer directly
+in web results. Search queries may be billed separately under the Gemini API
+pricing for grounding.
 
-### Set Up The Search Agent
+All Gemini Live choices offered by this integration support Search grounding:
 
-Following the
-[official Google Search workaround steps](https://www.home-assistant.io/integrations/google_generative_ai_conversation/#google-search) and check it is working with the offical Gemini integration.
+- Gemini 3.8 Live
+- Gemini 3.8 Live Extended Thinking
+- Gemini 3.1 Flash Live Preview
+- Gemini 2.5 Flash Native Audio Preview (12-2025)
 
-Once exposed, Gemini Live can discover and call `Assist: Search Google` through
-Home Assistant's Assist tools.
-
-### Turn on "Encourage web search"
-Gemini decides whether to call exposed tools. To make it more likely to use the
-search script for current information, enable **Encourage web search** in the
-Gemini Live integration options. This adds search-routing instructions to
-Gemini's system prompt and strengthens the exposed search tool description. It
-does not install, expose, or configure a search tool by itself.
+For the lowest latency and to avoid search charges, leave the option disabled
+when the assistant only needs Home Assistant state and control. Enable it when
+you want current events, changing facts, or web verification.
 
 ### Use the "Show text" Option for Screen Displays
 

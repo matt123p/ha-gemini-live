@@ -23,7 +23,11 @@ from gemini_live.const import (
 )
 from gemini_live.live import LiveConfig, LiveEvent
 from gemini_live.runtime import LiveSessionManager, TurnStore
-from gemini_live.stt import GeminiLiveSTT, GPTRealtimeSTT
+from gemini_live.stt import (
+    GeminiLiveSTT,
+    GPTRealtimeSTT,
+    _add_search_tool_instruction,
+)
 from gemini_live.utils import PCM24kTo16kStreamResampler, resample_24k_to_16k
 from homeassistant.components.stt import (
     AudioBitRates,
@@ -44,6 +48,27 @@ MIC_CHUNK = b"\x00\x00" * 3200
 EXTRA_MIC_CHUNKS = 2
 
 ENTITY_CLASSES = [GeminiLiveSTT, GPTRealtimeSTT]
+
+
+def test_native_search_grounding_adds_search_instruction_without_assist_tool():
+    instruction = _add_search_tool_instruction(
+        "base",
+        [],
+        True,
+        native_search_grounding=True,
+    )
+
+    assert instruction.startswith("base\n\nYou MUST use")
+
+
+def test_exposed_search_instruction_still_requires_search_like_tool():
+    assert _add_search_tool_instruction("base", [], True) == "base"
+    instruction = _add_search_tool_instruction(
+        "base",
+        [SimpleNamespace(name="search_google")],
+        True,
+    )
+    assert instruction.startswith("base\n\nYou MUST use")
 
 
 def test_stream_resampler_preserves_phase_across_arbitrary_chunks() -> None:

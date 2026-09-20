@@ -42,19 +42,23 @@ from .const import (
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
     CONF_PROVIDER,
+    CONF_SEARCH_GROUNDING,
     CONF_SYSTEM_INSTRUCTION,
     CONF_SHOW_TEXT,
     CONF_SUPPORT_BARGE_IN,
+    CONF_THINKING_LEVEL,
     CONF_TRANSCRIBE_GEMINI,
     CONF_TRANSCRIBE_GPT,
     CONF_VOICE,
     DEFAULT_AFFECTIVE_DIALOG,
     DEFAULT_SUPPORT_BARGE_IN,
+    DEFAULT_THINKING_LEVEL,
     DEFAULT_TRANSCRIBE_GEMINI,
     DEFAULT_TRANSCRIBE_GPT,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_SYSTEM_INSTRUCTION,
     DEFAULT_SHOW_TEXT,
+    DEFAULT_SEARCH_GROUNDING,
     DOMAIN,
     GEMINI_LIVE_TTS_PLACEHOLDER,
     GEMINI_SESSION_MANAGER_KEY,
@@ -88,7 +92,7 @@ BARGE_IN_STREAM_CHUNK_SIZE = 1280
 _SEARCH_TOOL_HINTS = ("search", "web", "google")
 
 _SEARCH_TOOL_INSTRUCTION = (
-    "Use the available web-search tool whenever the user asks for current, latest, "
+    "You MUST use the available web-search tool whenever the user asks for current, latest, "
     "recent, live, or otherwise time-sensitive external information, or when the "
     "answer may have changed since your training data. Also use it when the user "
     "explicitly asks you to search, look up, check online, or verify something. "
@@ -319,10 +323,14 @@ def _add_search_tool_instruction(
     system_instruction: str,
     tools: list[llm.Tool],
     encourage_web_search: bool,
+    native_search_grounding: bool = False,
 ) -> str:
-    """Tell Gemini when to use an exposed search-like Assist tool."""
-    if not encourage_web_search or not any(
+    """Tell the model when to use native or exposed web search."""
+    has_exposed_search_tool = any(
         _is_search_tool_name(tool.name) for tool in tools
+    )
+    if not encourage_web_search or not (
+        native_search_grounding or has_exposed_search_tool
     ):
         return system_instruction
     return f"{system_instruction}\n\n{_SEARCH_TOOL_INSTRUCTION}"
@@ -407,6 +415,7 @@ class LiveModelSTT(SpeechToTextEntity):
     default_transcribe = True
     default_system_instruction = DEFAULT_SYSTEM_INSTRUCTION
     supported_language_codes = SUPPORTED_LANGUAGES
+    supports_search_grounding = False
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize the STT entity."""
@@ -543,7 +552,7 @@ class LiveModelSTT(SpeechToTextEntity):
             system_instruction = _add_search_tool_instruction(
                 system_instruction,
                 ha_tools,
-                encourage_web_search,
+                encourage_web_search and not self.supports_search_grounding,
             )
             _LOGGER.debug("Loaded HA Assist LLM API with %d tools", len(ha_tools))
         except Exception as exc:  # noqa: BLE001
@@ -552,6 +561,13 @@ class LiveModelSTT(SpeechToTextEntity):
                 exc,
             )
 
+        if self.supports_search_grounding:
+            system_instruction = _add_search_tool_instruction(
+                system_instruction,
+                [],
+                encourage_web_search,
+                native_search_grounding=True,
+            )
         system_instruction = _add_end_conversation_instruction(system_instruction)
         if not transcribe_output and show_text:
             system_instruction = _add_show_text_instruction(system_instruction)
@@ -560,7 +576,7 @@ class LiveModelSTT(SpeechToTextEntity):
             _format_tools_for_live(
                 ha_tools,
                 llm_api.custom_serializer,
-                encourage_web_search,
+                encourage_web_search and not self.supports_search_grounding,
             )
             if llm_api
             else []
@@ -593,6 +609,15 @@ class LiveModelSTT(SpeechToTextEntity):
             affective_dialog=bool(
                 {**self.entry.data, **self.entry.options}.get(
                     CONF_AFFECTIVE_DIALOG, DEFAULT_AFFECTIVE_DIALOG
+                )
+            ),
+            search_grounding=(
+                self.supports_search_grounding and encourage_web_search
+            ),
+            thinking_level=(
+                {**self.entry.data, **self.entry.options}.get(
+                    CONF_THINKING_LEVEL,
+                    DEFAULT_THINKING_LEVEL,
                 )
             ),
         )
@@ -1437,9 +1462,20 @@ class LiveModelSTT(SpeechToTextEntity):
                 DEFAULT_SUPPORT_BARGE_IN,
             )
         )
-        encourage_web_search = bool(
-            config.get(CONF_ENCOURAGE_WEB_SEARCH, DEFAULT_ENCOURAGE_WEB_SEARCH)
-        )
+        if self.supports_search_grounding:
+            encourage_web_search = bool(
+                config.get(
+                    CONF_SEARCH_GROUNDING,
+                    DEFAULT_SEARCH_GROUNDING,
+                )
+            )
+        else:
+            encourage_web_search = bool(
+                config.get(
+                    CONF_ENCOURAGE_WEB_SEARCH,
+                    DEFAULT_ENCOURAGE_WEB_SEARCH,
+                )
+            )
         show_text = bool(
             config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT)
         )
@@ -1481,6 +1517,7 @@ class GeminiLiveSTT(LiveModelSTT):
     integration_name = "Gemini Live"
     transcribe_config_key = CONF_TRANSCRIBE_GEMINI
     default_transcribe = DEFAULT_TRANSCRIBE_GEMINI
+    supports_search_grounding = True
 
     async def _async_create_client(self, api_key: str) -> GeminiLiveClient:
         """Create the Gemini provider adapter."""
