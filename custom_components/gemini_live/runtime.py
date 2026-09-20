@@ -14,7 +14,7 @@ from typing import Any
 from uuid import uuid4
 from weakref import WeakValueDictionary
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 
 from .live import LiveClient, LiveConfig, LiveSession
 
@@ -491,14 +491,19 @@ def new_conversation_id() -> str:
 def active_pipeline_context(
     hass: HomeAssistant,
     stt_entity_id: str,
-) -> tuple[str, str | None]:
-    """Resolve the conversation ID and device ID for the active STT pipeline run.
+) -> tuple[str, str | None, Context | None]:
+    """Resolve conversation, device, and command context for the active STT run.
 
-    Home Assistant keeps both on PipelineRun but does not currently pass them
+    Home Assistant keeps these on PipelineRun but does not currently pass them
     through SpeechMetadata. The device ID is the same one Home Assistant
     forwards to the conversation agent, so the LLM API can resolve the
     satellite's area. The guarded introspection can be removed when the
     public STT API exposes a pipeline or conversation identifier.
+
+    Home Assistant emits STT_START immediately before entering the configured
+    STT provider, without yielding to another pipeline run. The most recently
+    started candidate is therefore the run making this call, even when an
+    older run is still active.
     """
     try:
         from homeassistant.components.assist_pipeline.pipeline import (  # noqa: PLC0415
@@ -507,7 +512,7 @@ def active_pipeline_context(
         )
 
         pipeline_data = hass.data[KEY_ASSIST_PIPELINE]
-        candidates: list[tuple[str, str, str | None]] = []
+        candidates: list[tuple[str, str, str | None, Context | None]] = []
         for runs in pipeline_data.pipeline_runs._pipeline_runs.values():
             for run in runs.values():
                 provider = getattr(run, "stt_provider", None)
@@ -528,13 +533,29 @@ def active_pipeline_context(
                     elif event.type == PipelineEventType.STT_START:
                         stt_started = event.timestamp
                         stt_ended = False
-                    elif event.type == PipelineEventType.STT_END:
+                    elif event.type in (
+                        PipelineEventType.STT_END,
+                        PipelineEventType.RUN_END,
+                        PipelineEventType.ERROR,
+                    ):
                         stt_ended = True
                 if conversation_id and stt_started and not stt_ended:
-                    candidates.append((stt_started, conversation_id, device_id))
+                    candidates.append(
+                        (
+                            stt_started,
+                            conversation_id,
+                            device_id,
+                            getattr(run, "context", None),
+                        )
+                    )
         if candidates:
-            _, conversation_id, device_id = max(candidates)
-            return conversation_id, device_id
+            _, conversation_id, device_id, pipeline_context = max(
+                candidates,
+                key=lambda candidate: candidate[0],
+            )
+            if not isinstance(pipeline_context, Context):
+                pipeline_context = None
+            return conversation_id, device_id, pipeline_context
     except Exception:  # noqa: BLE001
         _LOGGER.debug(
             "Could not resolve active pipeline conversation ID",
@@ -547,4 +568,4 @@ def active_pipeline_context(
         "using temporary conversation %s",
         conversation_id,
     )
-    return conversation_id, None
+    return conversation_id, None, None

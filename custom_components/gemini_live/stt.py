@@ -473,6 +473,7 @@ class LiveModelSTT(SpeechToTextEntity):
         result_future: asyncio.Future[SpeechResult],
         conversation_id: str,
         device_id: str | None,
+        pipeline_context: Context | None = None,
     ) -> SpeechResult:
         """Process audio using the configured live-model client."""
         turn_id = uuid4().hex[:8]
@@ -520,7 +521,11 @@ class LiveModelSTT(SpeechToTextEntity):
                 api_id=llm.LLM_API_ASSIST,
                 llm_context=llm.LLMContext(
                     platform=self.integration_domain,
-                    context=Context(),
+                    context=(
+                        pipeline_context
+                        if pipeline_context is not None
+                        else Context()
+                    ),
                     language=metadata.language or "en",
                     assistant="conversation",
                     device_id=device_id,
@@ -1279,7 +1284,10 @@ class LiveModelSTT(SpeechToTextEntity):
     ) -> SpeechResult:
         """Run the Live turn in the background so TTS can consume it immediately."""
         result_future: asyncio.Future[SpeechResult] = asyncio.Future()
-        conversation_id, device_id = active_pipeline_context(self.hass, self.entity_id)
+        conversation_id, device_id, pipeline_context = active_pipeline_context(
+            self.hass,
+            self.entity_id,
+        )
         task = self.hass.async_create_background_task(
             self._async_run_audio_stream_sdk(
                 metadata,
@@ -1295,6 +1303,7 @@ class LiveModelSTT(SpeechToTextEntity):
                 result_future,
                 conversation_id,
                 device_id,
+                pipeline_context,
             ),
             f"{self.integration_name} audio turn",
         )

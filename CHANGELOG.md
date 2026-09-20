@@ -2,6 +2,13 @@
 
 All notable changes to Gemini Live for Home Assistant are documented here.
 
+## Unreleased
+
+- Preserve the originating Assist pipeline context for voice-triggered tool
+  calls, so Home Assistant can retain satellite and pipeline provenance in
+  downstream service calls and Logbook activity. Unavailable or invalid
+  pipeline contexts continue to use an anonymous fallback.
+
 ## 1.0.8
 
 - Barge-in now keeps listening for the whole pipeline run: microphone audio

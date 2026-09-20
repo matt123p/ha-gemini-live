@@ -32,8 +32,10 @@ from homeassistant.components.stt import (
     AudioFormats,
     AudioSampleRates,
     SpeechMetadata,
+    SpeechResult,
     SpeechResultState,
 )
+from homeassistant.core import Context
 from homeassistant.helpers.issue_registry import DATA_REGISTRY as DATA_ISSUE_REGISTRY
 
 AUDIO_A = b"\x01\x00" * 12
@@ -402,6 +404,104 @@ async def test_legacy_mode_stops_microphone_forwarding_after_reply(
 
 
 @pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
+async def test_audio_tool_context_preserves_pipeline_provenance(
+    entity_class,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = FakeHass()
+    entity, _session_manager, _turn_store = _make_entity(
+        hass,
+        {"api_key": "k"},
+        entity_class,
+    )
+    session = ScriptedSession(support_barge_in=False)
+    _bind_client(entity, ScriptedClient(session))
+    source_context = Context(user_id="voice-user", parent_id="parent-context")
+    captured_contexts = []
+
+    async def fake_async_get_api(**kwargs):
+        captured_contexts.append(kwargs["llm_context"].context)
+        return SimpleNamespace(tools=[], api_prompt="", custom_serializer=None)
+
+    monkeypatch.setattr("gemini_live.stt.llm.async_get_api", fake_async_get_api)
+
+    mic = MicStream()
+    result_future = asyncio.Future()
+    run_task = asyncio.create_task(
+        entity._async_run_audio_stream_sdk(
+            _metadata(),
+            mic.chunks(),
+            "k",
+            "m",
+            "v",
+            "",
+            False,
+            False,
+            False,
+            False,
+            result_future,
+            "conversation-1",
+            "device-1",
+            source_context,
+        )
+    )
+
+    mic.put(MIC_CHUNK)
+    await asyncio.wait_for(session.reply_started.wait(), 5)
+    session.release_gate.set()
+    await asyncio.wait_for(run_task, 15)
+    mic.close()
+
+    assert captured_contexts == [source_context]
+
+
+async def test_audio_entry_point_forwards_resolved_pipeline_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hass = FakeHass()
+    entity, _session_manager, _turn_store = _make_entity(
+        hass,
+        {"api_key": "k"},
+        GeminiLiveSTT,
+    )
+    source_context = Context(user_id="voice-user")
+    captured_contexts = []
+
+    monkeypatch.setattr(
+        "gemini_live.stt.active_pipeline_context",
+        lambda *_args, **_kwargs: (
+            "conversation-1",
+            "device-1",
+            source_context,
+        ),
+    )
+
+    async def fake_run(*args):
+        captured_contexts.append(args[-1])
+        result = SpeechResult("user request", SpeechResultState.SUCCESS)
+        args[10].set_result(result)
+        return result
+
+    monkeypatch.setattr(entity, "_async_run_audio_stream_sdk", fake_run)
+
+    result = await entity._async_process_audio_stream_sdk(
+        _metadata(),
+        MicStream().chunks(),
+        "k",
+        "m",
+        "v",
+        "",
+        False,
+        False,
+        False,
+        False,
+    )
+
+    assert result.text == "user request"
+    assert captured_contexts == [source_context]
+
+
+@pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
 async def test_barge_in_drops_provider_transcript_when_transcription_disabled(
     entity_class,
     monkeypatch: pytest.MonkeyPatch,
@@ -427,7 +527,7 @@ async def test_barge_in_drops_provider_transcript_when_transcription_disabled(
     # Assistant; pin it so the published turn can be looked up below.
     monkeypatch.setattr(
         "gemini_live.stt.active_pipeline_context",
-        lambda *_args, **_kwargs: ("conversation-1", None),
+        lambda *_args, **_kwargs: ("conversation-1", None, None),
     )
 
     mic = MicStream()

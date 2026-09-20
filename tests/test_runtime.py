@@ -1,16 +1,168 @@
-"""Tests for AudioStream interruption and session configuration signatures."""
+"""Tests for runtime audio, session configuration, and pipeline context."""
 
 import asyncio
 import contextlib
+from types import SimpleNamespace
 
 from gemini_live.live import LiveConfig
-from gemini_live.runtime import AudioStream, LiveSessionManager
+from gemini_live.runtime import (
+    AudioStream,
+    LiveSessionManager,
+    active_pipeline_context,
+)
+from homeassistant.components.assist_pipeline.pipeline import (
+    KEY_ASSIST_PIPELINE,
+    PipelineEventType,
+)
+from homeassistant.core import Context
 
 
 def _make_config(**overrides) -> LiveConfig:
     defaults = {"model": "m", "voice": "v", "system_instruction": "s"}
     defaults.update(overrides)
     return LiveConfig(**defaults)
+
+
+def _pipeline_run(
+    run_id: str,
+    *,
+    conversation_id: str,
+    started_at: str,
+    context: object,
+    device_id: str = "device-1",
+    stt_entity_id: str = "stt.live_model",
+    final_event: PipelineEventType | None = None,
+):
+    events = [
+        SimpleNamespace(
+            type=PipelineEventType.RUN_START,
+            data={"conversation_id": conversation_id},
+            timestamp="0",
+        ),
+        SimpleNamespace(
+            type=PipelineEventType.STT_START,
+            data=None,
+            timestamp=started_at,
+        ),
+    ]
+    if final_event is not None:
+        events.append(
+            SimpleNamespace(type=final_event, data=None, timestamp="9")
+        )
+    return SimpleNamespace(
+        id=run_id,
+        pipeline=SimpleNamespace(id="pipeline-1"),
+        stt_provider=SimpleNamespace(entity_id=stt_entity_id),
+        _device_id=device_id,
+        context=context,
+        events=events,
+    )
+
+
+def _hass_with_pipeline_runs(*runs):
+    return SimpleNamespace(
+        data={
+            KEY_ASSIST_PIPELINE: SimpleNamespace(
+                pipeline_runs=SimpleNamespace(
+                    _pipeline_runs={
+                        "pipeline-1": {run.id: run for run in runs},
+                    }
+                ),
+                pipeline_debug={
+                    "pipeline-1": {
+                        run.id: SimpleNamespace(events=run.events) for run in runs
+                    }
+                },
+            )
+        }
+    )
+
+
+def test_active_pipeline_context_preserves_the_run_context():
+    source_context = Context(user_id="voice-user", parent_id="parent-context")
+    run = _pipeline_run(
+        "run-1",
+        conversation_id="conversation-1",
+        started_at="1",
+        context=source_context,
+    )
+
+    conversation_id, device_id, pipeline_context = active_pipeline_context(
+        _hass_with_pipeline_runs(run),
+        "stt.live_model",
+    )
+
+    assert conversation_id == "conversation-1"
+    assert device_id == "device-1"
+    assert pipeline_context is source_context
+    assert pipeline_context.user_id == "voice-user"
+    assert pipeline_context.parent_id == "parent-context"
+
+
+def test_active_pipeline_context_selects_the_most_recent_concurrent_run():
+    older = _pipeline_run(
+        "run-1",
+        conversation_id="conversation-1",
+        started_at="1",
+        context=Context(user_id="first-user"),
+        device_id="device-1",
+    )
+    newer = _pipeline_run(
+        "run-2",
+        conversation_id="conversation-2",
+        started_at="2",
+        context=Context(user_id="second-user"),
+        device_id="device-2",
+    )
+
+    conversation_id, device_id, pipeline_context = active_pipeline_context(
+        _hass_with_pipeline_runs(older, newer),
+        "stt.live_model",
+    )
+
+    assert conversation_id == "conversation-2"
+    assert device_id == "device-2"
+    assert pipeline_context is newer.context
+
+
+def test_active_pipeline_context_ignores_finished_and_error_runs(monkeypatch):
+    finished = _pipeline_run(
+        "run-1",
+        conversation_id="conversation-1",
+        started_at="1",
+        context=Context(),
+        final_event=PipelineEventType.RUN_END,
+    )
+    failed = _pipeline_run(
+        "run-2",
+        conversation_id="conversation-2",
+        started_at="2",
+        context=Context(),
+        final_event=PipelineEventType.ERROR,
+    )
+    monkeypatch.setattr(
+        "gemini_live.runtime.new_conversation_id",
+        lambda: "temporary-conversation",
+    )
+
+    assert active_pipeline_context(
+        _hass_with_pipeline_runs(finished, failed),
+        "stt.live_model",
+    ) == ("temporary-conversation", None, None)
+
+
+def test_active_pipeline_context_rejects_an_invalid_context():
+    run = _pipeline_run(
+        "run-1",
+        conversation_id="conversation-1",
+        started_at="1",
+        context=object(),
+    )
+
+    assert active_pipeline_context(
+        _hass_with_pipeline_runs(run),
+        "stt.live_model",
+    ) == ("conversation-1", "device-1", None)
 
 
 async def test_interrupt_discards_queued_audio_and_keeps_stream_open():
