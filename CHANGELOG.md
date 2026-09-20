@@ -17,6 +17,10 @@ All notable changes to Gemini Live for Home Assistant are documented here.
   calls, so Home Assistant can retain satellite and pipeline provenance in
   downstream service calls and Logbook activity. Unavailable or invalid
   pipeline contexts continue to use an anonymous fallback.
+- Fixed typed text turns failing with "live-model text path returned no usable
+  text" when the model ended the conversation via `end_conversation` without
+  producing any text. The text path now returns the unique `-- gemini live --`
+  pipeline placeholder for that turn instead of the generic error response.
 
 ## 1.0.8
 
