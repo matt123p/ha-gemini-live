@@ -99,10 +99,13 @@ def test_model_change_refreshes_before_model_specific_settings() -> None:
     assert _needs_model_specific_refresh(extended)
 
     extended[CONF_THINKING_LEVEL] = "medium"
-    assert _needs_model_specific_refresh(extended)
-
-    extended[CONF_AFFECTIVE_DIALOG] = True
     assert not _needs_model_specific_refresh(extended)
+
+    native_audio = {CONF_MODEL: "gemini-2.5-flash-native-audio-preview-12-2025"}
+    assert _needs_model_specific_refresh(native_audio)
+
+    native_audio[CONF_AFFECTIVE_DIALOG] = True
+    assert not _needs_model_specific_refresh(native_audio)
 
 
 def test_unsupported_model_settings_are_removed() -> None:
@@ -207,8 +210,9 @@ def test_barge_in_setting_persists_through_reconfigure(monkeypatch) -> None:
 
 def test_affective_dialog_only_shown_for_supported_models() -> None:
     for config, expected in (
-        ({CONF_MODEL: "gemini-3.8-live"}, True),
-        ({CONF_MODEL: "gemini-3.8-live-extended-thinking"}, True),
+        ({CONF_MODEL: "gemini-2.5-flash-native-audio-preview-12-2025"}, True),
+        ({CONF_MODEL: "gemini-3.8-live"}, False),
+        ({CONF_MODEL: "gemini-3.8-live-extended-thinking"}, False),
         ({CONF_MODEL: "gemini-3.1-flash-live-preview"}, False),
         ({}, False),
     ):
@@ -224,12 +228,13 @@ def test_affective_dialog_only_shown_for_supported_models() -> None:
 
 
 def test_affective_dialog_defaults_to_false() -> None:
-    schema = _provider_schema(PROVIDER_GEMINI, {CONF_MODEL: "gemini-3.8-live"})
+    model = "gemini-2.5-flash-native-audio-preview-12-2025"
+    schema = _provider_schema(PROVIDER_GEMINI, {CONF_MODEL: model})
 
     result = schema(
         {
             CONF_API_KEY: "key",
-            CONF_MODEL: "gemini-3.8-live",
+            CONF_MODEL: model,
             CONF_VOICE: _VALID_VOICE[PROVIDER_GEMINI],
         }
     )
@@ -239,15 +244,16 @@ def test_affective_dialog_defaults_to_false() -> None:
 
 
 def test_affective_dialog_setting_persists_through_reconfigure() -> None:
+    model = "gemini-2.5-flash-native-audio-preview-12-2025"
     schema = _provider_schema(
         PROVIDER_GEMINI,
-        {CONF_MODEL: "gemini-3.8-live", CONF_AFFECTIVE_DIALOG: True},
+        {CONF_MODEL: model, CONF_AFFECTIVE_DIALOG: True},
     )
 
     result = schema(
         {
             CONF_API_KEY: "key",
-            CONF_MODEL: "gemini-3.8-live",
+            CONF_MODEL: model,
             CONF_VOICE: _VALID_VOICE[PROVIDER_GEMINI],
         }
     )

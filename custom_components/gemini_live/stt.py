@@ -624,13 +624,18 @@ class LiveModelSTT(SpeechToTextEntity):
         )
 
         _LOGGER.warning(
-            "[turn=%s] live config prepared model=%s voice=%s has_tools=%s output_transcription=%s barge_in=%s",
+            "[turn=%s] live config prepared model=%s voice=%s has_tools=%s "
+            "output_transcription=%s barge_in=%s affective_dialog=%s "
+            "search_grounding=%s thinking_level=%s",
             turn_id,
             model,
             voice,
             bool(live_tools),
             transcribe_output,
             support_barge_in,
+            live_config.affective_dialog,
+            live_config.search_grounding,
+            live_config.thinking_level,
         )
         if support_barge_in:
             _LOGGER.debug(
@@ -793,7 +798,12 @@ class LiveModelSTT(SpeechToTextEntity):
                     )
                     raise
                 except Exception as exc:  # noqa: BLE001
-                    _LOGGER.exception("[turn=%s] Failure inside send_audio: %s", turn_id, exc)
+                    _LOGGER.exception(
+                        "[turn=%s] Failure inside send_audio: %s (last outgoing client message: %s)",
+                        turn_id,
+                        exc,
+                        getattr(session, "last_outgoing", "unknown"),
+                    )
                     raise
 
             async def receive_responses() -> None:
@@ -1050,9 +1060,11 @@ class LiveModelSTT(SpeechToTextEntity):
                         )
                     else:
                         _LOGGER.exception(
-                            "[turn=%s] error in receive_responses: %s",
+                            "[turn=%s] error in receive_responses: %s "
+                            "(last outgoing client message: %s)",
                             turn_id,
                             exc,
+                            getattr(session, "last_outgoing", "unknown"),
                         )
                     raise
 

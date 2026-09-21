@@ -64,11 +64,13 @@ def supports_thinking_level(model: str | None) -> bool:
 
 # Model generations that expose the affective-dialog setting. Affective
 # dialog lets the model read the tone and emotion in the user's voice and
-# adapt its own speaking style to match. Per the Live API documentation, the
-# only Live model that does not support it is Gemini 3.1 Flash Live.
+# adapt its own speaking style to match. The Gemini 3.8 Live generation
+# removed the feature from the API entirely: sending enable_affective_dialog
+# to those models aborts the session with "Request contains an invalid
+# argument" (websocket close 1007), and Gemini 3.1 Flash Live never
+# supported it. Only the 2.5 native-audio generation accepts the field.
 AFFECTIVE_DIALOG_MODELS = {
-    "gemini-3.8-live",
-    "gemini-3.8-live-extended-thinking",
+    "gemini-2.5-flash-native-audio-preview-12-2025",
 }
 
 

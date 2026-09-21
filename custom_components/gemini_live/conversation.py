@@ -419,10 +419,11 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                 )
             else:
                 _LOGGER.exception(
-                    "[turn=%s] error in %s text path: %s",
+                    "[turn=%s] error in %s text path: %s (last outgoing client message: %s)",
                     turn_id,
                     self.integration_name,
                     exc,
+                    getattr(session, "last_outgoing", "unknown"),
                 )
                 return None
 

@@ -4,6 +4,11 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Fixed Gemini 3.8 sessions with affective dialog failing every voice turn with
+  "Request contains an invalid argument" (websocket close 1007) by sending
+  `enable_affective_dialog` inside `generation_config`, where the v1beta Live
+  API wire proto actually defines it, instead of at the top level of the setup
+  message.
 - Barge-in no longer fails setup on Home Assistant Core builds without TTS
   interruption support. The option is hidden from the config and options flows,
   any stored barge-in setting is ignored at runtime, and the previous

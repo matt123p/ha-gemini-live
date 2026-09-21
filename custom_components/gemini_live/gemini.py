@@ -104,6 +104,12 @@ class GeminiLiveSession:
         self._session = session
         self._support_barge_in = support_barge_in
         self._extended_thinking = extended_thinking
+        # Describes the most recent client message handed to the provider, so
+        # a transport failure can be attributed to the message that likely
+        # triggered it. The setup message counts as accepted once connect()
+        # returns; the server rejects invalid setups before yielding a
+        # session at all.
+        self.last_outgoing = "setup (accepted)"
 
     @property
     def is_open(self) -> bool:
@@ -119,12 +125,15 @@ class GeminiLiveSession:
         await self._session.send_realtime_input(
             audio=types.Blob(data=audio, mime_type="audio/pcm;rate=16000")
         )
+        self.last_outgoing = f"realtime audio chunk ({len(audio)} bytes)"
 
     async def end_audio(self) -> None:
         await self._session.send_realtime_input(audio_stream_end=True)
+        self.last_outgoing = "realtime audio_stream_end"
 
     async def send_text(self, text: str) -> None:
         await self._session.send_realtime_input(text=text)
+        self.last_outgoing = f"realtime text ({len(text)} chars)"
 
     async def send_tool_responses(
         self, responses: list[LiveToolResponse]
@@ -140,6 +149,9 @@ class GeminiLiveSession:
                 )
                 for response in responses
             ]
+        )
+        self.last_outgoing = (
+            f"tool_response for {[response.name for response in responses]}"
         )
 
     async def receive(self) -> AsyncIterator[LiveEvent]:
@@ -238,8 +250,14 @@ def _gemini_config(config: LiveConfig) -> dict[str, Any]:
         result["output_audio_transcription"] = {}
     if supports_affective_dialog(config.model) and config.affective_dialog:
         # Let the model read the tone and emotion in the user's voice and
-        # adapt its own speaking style to match.
-        result["enable_affective_dialog"] = True
+        # adapt its own speaking style to match. The v1beta wire proto only
+        # defines enable_affective_dialog inside generation_config; sending it
+        # at the top level of the setup (which the SDK also accepts) makes the
+        # server abort the session with "Request contains an invalid
+        # argument" (websocket close 1007).
+        result.setdefault("generation_config", {})[
+            "enable_affective_dialog"
+        ] = True
     if config.model == EXTENDED_THINKING_MODEL:
         result["thinking_config"] = {
             "thinking_level": config.thinking_level or DEFAULT_THINKING_LEVEL

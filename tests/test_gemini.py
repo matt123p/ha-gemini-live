@@ -168,30 +168,34 @@ def test_gemini_config_search_grounding_combines_with_function_tools():
     assert config["tools"][1]["function_declarations"][0]["name"] == "my_tool"
 
 
-def test_gemini_config_affective_dialog_only_for_38_models():
+def test_gemini_config_affective_dialog_only_for_25_native_audio():
     enabled = _gemini_config(
-        _make_config(model="gemini-3.8-live", affective_dialog=True)
-    )
-    assert enabled["enable_affective_dialog"] is True
-    assert "proactivity" not in enabled
-
-    extended = _gemini_config(
-        _make_config(model="gemini-3.8-live-extended-thinking", affective_dialog=True)
-    )
-    assert extended["enable_affective_dialog"] is True
-
-    disabled = _gemini_config(
-        _make_config(model="gemini-3.8-live", affective_dialog=False)
-    )
-    assert "enable_affective_dialog" not in disabled
-
-    unsupported = _gemini_config(
         _make_config(
-            model="gemini-3.1-flash-live-preview",
+            model="gemini-2.5-flash-native-audio-preview-12-2025",
             affective_dialog=True,
         )
     )
-    assert "enable_affective_dialog" not in unsupported
+    assert enabled["generation_config"] == {"enable_affective_dialog": True}
+    assert "enable_affective_dialog" not in enabled
+    assert "proactivity" not in enabled
+
+    disabled = _gemini_config(
+        _make_config(
+            model="gemini-2.5-flash-native-audio-preview-12-2025",
+            affective_dialog=False,
+        )
+    )
+    assert "generation_config" not in disabled
+
+    for model in (
+        "gemini-3.8-live",
+        "gemini-3.8-live-extended-thinking",
+        "gemini-3.1-flash-live-preview",
+    ):
+        removed = _gemini_config(
+            _make_config(model=model, affective_dialog=True)
+        )
+        assert "generation_config" not in removed
 
 
 async def test_gemini_client_pins_v1beta(monkeypatch):
