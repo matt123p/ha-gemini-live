@@ -23,7 +23,7 @@ The integration checks for the required Core API before allowing barge-in to be
 enabled. Specifically, Core must provide:
 
 - `TTSAudioRequest.on_audio_interrupt`; and
-- `TTSAudioResponse.passthrough`.
+- `TextToSpeechEntity.supports_audio_interrupt`.
 
 If either API is missing, the config or options flow rejects barge-in. With
 barge-in disabled, the integration continues to work with an unmodified Home
@@ -39,8 +39,7 @@ User speaks during assistant playback
     -> Gemini/OpenAI detects speech and interrupts generation
     -> ha-gemini-live discards queued model audio
     -> Gemini Live TTS invokes Core's on_audio_interrupt callback
-    -> Core discards audio queued in its TTS cache
-    -> Core notifies the active Assist satellite ResultStream consumer
+    -> Core forwards the callback directly to the consuming satellite
     -> Wyoming: AudioStop followed by AudioStart
        ESPHome: TTS_STREAM_END followed by TTS_STREAM_START
     -> satellite purges old playback
@@ -73,16 +72,23 @@ barge-in must not implicitly enable or display the assistant transcript.
 
 The Core patch:
 
-- supplies `on_audio_interrupt` to streaming TTS entities;
-- lets an interrupt-capable TTS response request passthrough streaming;
-- removes audio already queued in Core's active `TTSCache` consumers;
-- publishes the interruption to active `ResultStream` listeners; and
+- lets an entity opt in through `supports_audio_interrupt`;
+- bypasses memory and disk caches entirely for that entity's responses;
+- starts generation when a single interrupt-capable satellite consumes the stream;
+- passes the satellite's `on_audio_interrupt` callback directly to the engine; and
 - converts that notification into the native satellite transport boundaries
   described below.
 
-Passthrough is important because an ffmpeg conversion subprocess would buffer
-audio outside the interrupt-aware path. It is enabled only when barge-in is
-configured.
+Interruptible streams require native output: this integration supplies 16 kHz,
+mono, 16-bit PCM WAV. Core rejects unsupported output options or an extension
+mismatch instead of routing the stream through ffmpeg. Buffered consumers such
+as VoIP, HTTP/media-player playback, and repeated consumers are not supported
+with barge-in enabled. Ordinary TTS caching and conversion remain unchanged
+when barge-in is disabled.
+
+ESPHome speaker playback starts at `INTENT_PROGRESS` for interruptible streams,
+using the token supplied at `RUN_START`. This drains live audio while the
+conversation is still producing text and avoids waiting until `TTS_END`.
 
 ### Remote satellite
 

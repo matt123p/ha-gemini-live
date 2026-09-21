@@ -3,15 +3,21 @@
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
+from contextlib import aclosing, suppress
 from typing import Any
 
 from homeassistant.components.tts import (
+    ATTR_PREFERRED_FORMAT,
+    ATTR_PREFERRED_SAMPLE_BYTES,
+    ATTR_PREFERRED_SAMPLE_CHANNELS,
+    ATTR_PREFERRED_SAMPLE_RATE,
     TextToSpeechEntity,
     TtsAudioType,
 )
 from homeassistant.components.tts.entity import TTSAudioRequest, TTSAudioResponse
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -81,7 +87,22 @@ class GeminiLiveTTS(TextToSpeechEntity):
     @property
     def supported_options(self) -> list[str]:
         """Return supported options."""
-        return []
+        return [
+            ATTR_PREFERRED_FORMAT,
+            ATTR_PREFERRED_SAMPLE_RATE,
+            ATTR_PREFERRED_SAMPLE_CHANNELS,
+            ATTR_PREFERRED_SAMPLE_BYTES,
+        ]
+
+    @property
+    def supports_audio_interrupt(self) -> bool:
+        """Use Core's uncached, single-consumer stream when barge-in is enabled."""
+        return self._support_barge_in
+
+    @property
+    def default_options(self) -> dict[str, Any]:
+        """Use the native WAV format for interruptible playback."""
+        return {ATTR_PREFERRED_FORMAT: "wav"} if self._support_barge_in else {}
 
     async def async_get_tts_audio(
         self,
@@ -111,6 +132,19 @@ class GeminiLiveTTS(TextToSpeechEntity):
         request: TTSAudioRequest,
     ) -> TTSAudioResponse:
         """Stream the live model's native audio response as it arrives."""
+        if self._support_barge_in:
+            native_options = {
+                ATTR_PREFERRED_FORMAT: "wav",
+                ATTR_PREFERRED_SAMPLE_RATE: 16000,
+                ATTR_PREFERRED_SAMPLE_CHANNELS: 1,
+                ATTR_PREFERRED_SAMPLE_BYTES: 2,
+            }
+            for option, native_value in native_options.items():
+                value = request.options.get(option, native_value)
+                if str(value) != str(native_value):
+                    raise HomeAssistantError(
+                        "Barge-in requires 16 kHz, mono, 16-bit PCM WAV playback"
+                    )
         entry_data = self.hass.data[self.integration_domain][self.entry.entry_id]
         turn_store = entry_data[self.turn_store_key]
         try:
@@ -148,12 +182,15 @@ class GeminiLiveTTS(TextToSpeechEntity):
                     )
                 try:
                     yield streaming_wav_header()
-                    async for chunk in audio.async_chunks():
-                        yield chunk
+                    async with aclosing(audio.async_chunks()) as chunks:
+                        async for chunk in chunks:
+                            yield chunk
                 finally:
                     if unsubscribe_interrupt is not None:
                         unsubscribe_interrupt()
-                    await drain_task
+                    drain_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await drain_task
                 return
             if audio:
                 yield audio
@@ -165,10 +202,7 @@ class GeminiLiveTTS(TextToSpeechEntity):
             message[:80] if message else "(none)",
             isinstance(audio, AudioStream),
         )
-        response = TTSAudioResponse("wav", data_gen())
-        if self._support_barge_in and hasattr(response, "passthrough"):
-            response.passthrough = True
-        return response
+        return TTSAudioResponse("wav", data_gen())
 
     def _get_dummy_wav(self) -> bytes:
         """Return 1 second of silence as 16kHz mono 16-bit PCM WAV."""

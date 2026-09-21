@@ -1,11 +1,13 @@
 """Tests for the Gemini Live TTS platform."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.gemini_live.const import (
     CONF_SUPPORT_BARGE_IN,
@@ -18,12 +20,11 @@ from custom_components.gemini_live.utils import streaming_wav_header
 
 
 @dataclass
-class _ResponseWithPassthrough:
+class _InterruptResponse:
     """Represent the response type provided by Core with interrupt support."""
 
     extension: str
     data_gen: AsyncGenerator[bytes]
-    passthrough: bool = False
 
 
 @dataclass
@@ -68,7 +69,7 @@ async def test_core_interrupt_support_is_only_used_for_barge_in(
     """Use Core's optional interruption API only when barge-in is enabled."""
     monkeypatch.setattr(
         "custom_components.gemini_live.tts.TTSAudioResponse",
-        _ResponseWithPassthrough,
+        _InterruptResponse,
     )
     audio = AudioStream()
     on_audio_interrupt = Mock()
@@ -76,10 +77,11 @@ async def test_core_interrupt_support_is_only_used_for_barge_in(
     request = SimpleNamespace(
         message_gen=_message_gen(),
         on_audio_interrupt=on_audio_interrupt,
+        options={},
     )
 
     response = await entity.async_stream_tts_audio(request)
-    assert response.passthrough is barge_in
+    assert entity.supports_audio_interrupt is barge_in
 
     assert await anext(response.data_gen) == streaming_wav_header()
     audio.interrupt()
@@ -92,12 +94,12 @@ async def test_core_interrupt_support_is_only_used_for_barge_in(
 async def test_barge_in_remains_compatible_with_legacy_core(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Keep streaming when the installed Core has no interruption API."""
+    """Keep streaming with barge-in disabled when Core has no interruption API."""
     monkeypatch.setattr(
         "custom_components.gemini_live.tts.TTSAudioResponse", _LegacyResponse
     )
     audio = AudioStream()
-    entity = _make_tts(barge_in=True, audio=audio)
+    entity = _make_tts(barge_in=False, audio=audio)
     request = SimpleNamespace(message_gen=_message_gen())
 
     response = await entity.async_stream_tts_audio(request)
@@ -105,3 +107,37 @@ async def test_barge_in_remains_compatible_with_legacy_core(
     audio.interrupt()
     audio.finish()
     await response.data_gen.aclose()
+
+
+@pytest.mark.asyncio
+async def test_interruptible_tts_rejects_non_native_audio() -> None:
+    """Do not label native 16 kHz audio as a satellite's different requested rate."""
+    entity = _make_tts(barge_in=True, audio=AudioStream())
+    request = SimpleNamespace(options={"preferred_sample_rate": 48000})
+    with pytest.raises(HomeAssistantError, match="16 kHz"):
+        await entity.async_stream_tts_audio(request)
+
+
+@pytest.mark.asyncio
+async def test_closing_tts_cancels_live_audio_and_message_drain() -> None:
+    """Closing playback must not wait for the remaining conversation text."""
+    cancelled = Mock()
+    audio = AudioStream(on_cancel=cancelled)
+    await audio.add_chunk(b"audio")
+    entity = _make_tts(barge_in=True, audio=audio)
+
+    async def message() -> AsyncGenerator[str]:
+        yield "-- gemini live --"
+        await asyncio.Event().wait()
+
+    request = SimpleNamespace(
+        message_gen=message(), options={}, on_audio_interrupt=Mock()
+    )
+    response = await entity.async_stream_tts_audio(request)
+    await anext(response.data_gen)
+    assert await anext(response.data_gen) == b"audio"
+    async with asyncio.timeout(1):
+        await response.data_gen.aclose()
+    cancelled.assert_called_once()
+    audio.interrupt()
+    request.on_audio_interrupt.assert_not_called()
