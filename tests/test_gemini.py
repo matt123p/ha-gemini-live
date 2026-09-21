@@ -166,12 +166,13 @@ def test_gemini_config_affective_dialog_only_for_38_models():
     enabled = _gemini_config(
         _make_config(model="gemini-3.8-live", affective_dialog=True)
     )
-    assert enabled["proactivity"] == {"enable_affective_dialog": True}
+    assert enabled["enable_affective_dialog"] is True
+    assert "proactivity" not in enabled
 
     disabled = _gemini_config(
         _make_config(model="gemini-3.8-live", affective_dialog=False)
     )
-    assert "proactivity" not in disabled
+    assert "enable_affective_dialog" not in disabled
 
     unsupported = _gemini_config(
         _make_config(
@@ -179,7 +180,7 @@ def test_gemini_config_affective_dialog_only_for_38_models():
             affective_dialog=True,
         )
     )
-    assert "proactivity" not in unsupported
+    assert "enable_affective_dialog" not in unsupported
 
 
 async def test_gemini_interrupted_event_is_normalized():

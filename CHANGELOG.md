@@ -4,6 +4,8 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Fixed affective-dialog sessions failing SDK validation by sending
+  `enable_affective_dialog` at the top level of the Gemini Live config.
 - Added `gemini-3.8-live-extended-thinking`, including its asynchronous tool
   declarations, configurable low/medium/high thinking level, and
   multi-utterance interaction lifecycle, and changed model selection to a

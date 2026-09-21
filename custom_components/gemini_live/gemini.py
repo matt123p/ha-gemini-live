@@ -228,7 +228,7 @@ def _gemini_config(config: LiveConfig) -> dict[str, Any]:
     if supports_affective_dialog(config.model) and config.affective_dialog:
         # Let the model read the tone and emotion in the user's voice and
         # adapt its own speaking style to match.
-        result["proactivity"] = {"enable_affective_dialog": True}
+        result["enable_affective_dialog"] = True
     if config.model == EXTENDED_THINKING_MODEL:
         result["thinking_config"] = {
             "thinking_level": config.thinking_level or DEFAULT_THINKING_LEVEL
