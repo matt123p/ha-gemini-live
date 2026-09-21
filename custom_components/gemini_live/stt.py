@@ -1521,7 +1521,14 @@ class GeminiLiveSTT(LiveModelSTT):
 
     async def _async_create_client(self, api_key: str) -> GeminiLiveClient:
         """Create the Gemini provider adapter."""
-        return await async_create_gemini_client(self.hass, api_key)
+        affective_dialog = bool(
+            {**self.entry.data, **self.entry.options}.get(
+                CONF_AFFECTIVE_DIALOG, DEFAULT_AFFECTIVE_DIALOG
+            )
+        )
+        return await async_create_gemini_client(
+            self.hass, api_key, affective_dialog=affective_dialog
+        )
 
     @staticmethod
     def _api_error_message(exc: BaseException) -> str | None:

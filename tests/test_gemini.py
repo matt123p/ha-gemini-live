@@ -1,8 +1,14 @@
 """Tests for the Gemini Live adapter's barge-in behaviour."""
 
+import sys
 from types import SimpleNamespace
 
-from gemini_live.gemini import GeminiLiveClient, GeminiLiveSession, _gemini_config
+from gemini_live.gemini import (
+    GeminiLiveClient,
+    GeminiLiveSession,
+    _gemini_config,
+    async_create_gemini_client,
+)
 from gemini_live.live import LiveConfig, LiveEvent, LiveTool
 
 
@@ -169,6 +175,11 @@ def test_gemini_config_affective_dialog_only_for_38_models():
     assert enabled["enable_affective_dialog"] is True
     assert "proactivity" not in enabled
 
+    extended = _gemini_config(
+        _make_config(model="gemini-3.8-live-extended-thinking", affective_dialog=True)
+    )
+    assert extended["enable_affective_dialog"] is True
+
     disabled = _gemini_config(
         _make_config(model="gemini-3.8-live", affective_dialog=False)
     )
@@ -181,6 +192,47 @@ def test_gemini_config_affective_dialog_only_for_38_models():
         )
     )
     assert "enable_affective_dialog" not in unsupported
+
+
+async def test_gemini_client_pins_v1beta(monkeypatch):
+    captured = {}
+
+    class _FakeHttpOptions:
+        def __init__(self, api_version=None):
+            self.api_version = api_version
+            captured["api_version"] = api_version
+
+    class _FakeClient:
+        def __init__(self, api_key=None, http_options=None):
+            self.api_key = api_key
+            self.http_options = http_options
+
+    class _FakeGenaiModule:
+        types = SimpleNamespace(HttpOptions=_FakeHttpOptions)
+        Client = _FakeClient
+
+    monkeypatch.setitem(
+        sys.modules, "google", SimpleNamespace(genai=_FakeGenaiModule)
+    )
+    monkeypatch.setitem(sys.modules, "google.genai", _FakeGenaiModule)
+
+    class _Hass:
+        async def async_add_executor_job(self, func):
+            return func()
+
+    client = await async_create_gemini_client(
+        _Hass(), "test-key", affective_dialog=True
+    )
+
+    assert isinstance(client, GeminiLiveClient)
+    assert client._client.api_key == "test-key"
+    assert client._client.http_options is not None
+    assert captured["api_version"] == "v1beta"
+
+    client = await async_create_gemini_client(_Hass(), "test-key")
+
+    assert isinstance(client, GeminiLiveClient)
+    assert client._client.http_options is None
 
 
 async def test_gemini_interrupted_event_is_normalized():

@@ -41,11 +41,22 @@ def _uses_async_function_calling(model: str | None) -> bool:
     return model.startswith(_ASYNC_FUNCTION_CALLING_MODEL_PREFIXES)
 
 
-async def async_create_gemini_client(hass: Any, api_key: str) -> GeminiLiveClient:
+async def async_create_gemini_client(
+    hass: Any, api_key: str, affective_dialog: bool = False
+) -> GeminiLiveClient:
     """Create the Google SDK client and wrap it in the neutral adapter."""
+    from google.genai import types  # noqa: PLC0415
     from google import genai  # noqa: PLC0415
 
-    client = await hass.async_add_executor_job(lambda: genai.Client(api_key=api_key))
+    http_options = None
+    if affective_dialog:
+        # Affective dialog is only accepted on the v1beta endpoint; newer SDK
+        # default versions reject it with "Request contains an invalid
+        # argument" (websocket close 1007).
+        http_options = types.HttpOptions(api_version="v1beta")
+    client = await hass.async_add_executor_job(
+        lambda: genai.Client(api_key=api_key, http_options=http_options)
+    )
     return GeminiLiveClient(client)
 
 

@@ -4,6 +4,12 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Fixed Gemini Live rejecting the affective-dialog setup with
+  "Request contains an invalid argument" (websocket close 1007) by pinning the
+  client to the `v1beta` API version when affective dialog is enabled, which
+  the Live API requires for `enable_affective_dialog`.
+- Extended the affective-dialog switch to `gemini-3.8-live-extended-thinking`;
+  per the Live API documentation only Gemini 3.1 Flash Live lacks support.
 - Fixed affective-dialog sessions failing SDK validation by sending
   `enable_affective_dialog` at the top level of the Gemini Live config.
 - Added `gemini-3.8-live-extended-thinking`, including its asynchronous tool

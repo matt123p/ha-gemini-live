@@ -64,8 +64,12 @@ def supports_thinking_level(model: str | None) -> bool:
 
 # Model generations that expose the affective-dialog setting. Affective
 # dialog lets the model read the tone and emotion in the user's voice and
-# adapt its own speaking style to match.
-AFFECTIVE_DIALOG_MODELS = {"gemini-3.8-live"}
+# adapt its own speaking style to match. Per the Live API documentation, the
+# only Live model that does not support it is Gemini 3.1 Flash Live.
+AFFECTIVE_DIALOG_MODELS = {
+    "gemini-3.8-live",
+    "gemini-3.8-live-extended-thinking",
+}
 
 
 def supports_affective_dialog(model: str | None) -> bool:

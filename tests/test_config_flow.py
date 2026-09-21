@@ -100,6 +100,9 @@ def test_model_change_refreshes_before_model_specific_settings() -> None:
     assert _needs_model_specific_refresh(extended)
 
     extended[CONF_THINKING_LEVEL] = "medium"
+    assert _needs_model_specific_refresh(extended)
+
+    extended[CONF_AFFECTIVE_DIALOG] = True
     assert not _needs_model_specific_refresh(extended)
 
 
@@ -171,7 +174,7 @@ def test_barge_in_requires_core_interruption_support(
 def test_affective_dialog_only_shown_for_supported_models() -> None:
     for config, expected in (
         ({CONF_MODEL: "gemini-3.8-live"}, True),
-        ({CONF_MODEL: "gemini-3.8-live-extended-thinking"}, False),
+        ({CONF_MODEL: "gemini-3.8-live-extended-thinking"}, True),
         ({CONF_MODEL: "gemini-3.1-flash-live-preview"}, False),
         ({}, False),
     ):
