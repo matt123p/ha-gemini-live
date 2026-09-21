@@ -20,6 +20,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .compat import supports_tts_interruption
 from .const import (
     CONF_PROVIDER,
     CONF_SUPPORT_BARGE_IN,
@@ -70,7 +71,9 @@ class GeminiLiveTTS(TextToSpeechEntity):
         """Initialize the TTS entity."""
         self.entry = entry
         config = {**entry.data, **entry.options}
-        self._support_barge_in = bool(config.get(CONF_SUPPORT_BARGE_IN, False))
+        self._support_barge_in = bool(
+            config.get(CONF_SUPPORT_BARGE_IN, False)
+        ) and supports_tts_interruption()
         self._attr_name = self.integration_name
         self._attr_unique_id = f"{entry.entry_id}_tts"
 

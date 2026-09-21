@@ -25,7 +25,8 @@ enabled. Specifically, Core must provide:
 - `TTSAudioRequest.on_audio_interrupt`; and
 - `TextToSpeechEntity.supports_audio_interrupt`.
 
-If either API is missing, the config or options flow rejects barge-in. With
+If either API is missing, the barge-in option is hidden from the config and
+options flows, and any stored barge-in setting is ignored at runtime. With
 barge-in disabled, the integration continues to work with an unmodified Home
 Assistant Core.
 

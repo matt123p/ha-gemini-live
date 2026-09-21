@@ -50,6 +50,14 @@ EXTRA_MIC_CHUNKS = 2
 ENTITY_CLASSES = [GeminiLiveSTT, GPTRealtimeSTT]
 
 
+@pytest.fixture(autouse=True)
+def _core_supports_interruption(monkeypatch: pytest.MonkeyPatch):
+    """Pretend Core provides the complete TTS interruption path."""
+    monkeypatch.setattr(
+        "gemini_live.stt.supports_tts_interruption", lambda: True
+    )
+
+
 def test_native_search_grounding_adds_search_instruction_without_assist_tool():
     instruction = _add_search_tool_instruction(
         "base",

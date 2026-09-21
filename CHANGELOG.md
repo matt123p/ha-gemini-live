@@ -4,6 +4,10 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Barge-in no longer fails setup on Home Assistant Core builds without TTS
+  interruption support. The option is hidden from the config and options flows,
+  any stored barge-in setting is ignored at runtime, and the previous
+  `ConfigEntryError` was removed.
 - Fixed Gemini Live rejecting the affective-dialog setup with
   "Request contains an invalid argument" (websocket close 1007) by pinning the
   client to the `v1beta` API version when affective dialog is enabled, which

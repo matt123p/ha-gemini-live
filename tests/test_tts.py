@@ -47,6 +47,15 @@ async def _message_gen() -> AsyncGenerator[str]:
     yield "-- gemini live --"
 
 
+@pytest.fixture(autouse=True)
+def _core_supports_interruption(monkeypatch: pytest.MonkeyPatch):
+    """Pretend Core provides the complete TTS interruption path."""
+    monkeypatch.setattr(
+        "custom_components.gemini_live.tts.supports_tts_interruption",
+        lambda: True,
+    )
+
+
 def _make_tts(*, barge_in: bool, audio: AudioStream) -> GeminiLiveTTS:
     entry = SimpleNamespace(
         entry_id="test-entry",

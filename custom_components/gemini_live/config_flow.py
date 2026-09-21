@@ -163,13 +163,6 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
             CONF_SHOW_TEXT,
             default=current.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT),
         ): selector.BooleanSelector(),
-        vol.Optional(
-            CONF_SUPPORT_BARGE_IN,
-            default=current.get(
-                CONF_SUPPORT_BARGE_IN,
-                DEFAULT_SUPPORT_BARGE_IN,
-            ),
-        ): selector.BooleanSelector(),
     }
     if not is_openai and not is_personaplex:
         # All Gemini Live models offered by this integration support Google's
@@ -188,6 +181,17 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
             default=current.get(
                 CONF_ENCOURAGE_WEB_SEARCH,
                 DEFAULT_ENCOURAGE_WEB_SEARCH,
+            ),
+        )] = selector.BooleanSelector()
+    if not is_personaplex and supports_tts_interruption():
+        # Barge-in needs Core's complete TTS interruption path. When the
+        # installed Core cannot propagate interruptions, the setting cannot do
+        # anything, so it is hidden entirely and never blocks setup.
+        fields[vol.Optional(
+            CONF_SUPPORT_BARGE_IN,
+            default=current.get(
+                CONF_SUPPORT_BARGE_IN,
+                DEFAULT_SUPPORT_BARGE_IN,
             ),
         )] = selector.BooleanSelector()
     # The affective-dialog switch is Gemini-specific and only rendered for
@@ -220,18 +224,19 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
     if is_personaplex:
         # PersonaPlex currently has no function-calling, display-text tool, or
         # explicit VAD event surface in its public realtime API.
-        for key in (CONF_SHOW_TEXT, CONF_SUPPORT_BARGE_IN):
-            marker = next(marker for marker in fields if marker.schema == key)
-            del fields[marker]
+        marker = next(marker for marker in fields if marker.schema == CONF_SHOW_TEXT)
+        del fields[marker]
     return vol.Schema(fields)
 
 
 def _strip_unsupported_settings(user_input: dict[str, Any]) -> dict[str, Any]:
-    """Drop model-specific settings the selected model does not support."""
+    """Drop settings the selected model or Core does not support."""
     if not supports_affective_dialog(user_input.get(CONF_MODEL)):
         user_input.pop(CONF_AFFECTIVE_DIALOG, None)
     if not supports_thinking_level(user_input.get(CONF_MODEL)):
         user_input.pop(CONF_THINKING_LEVEL, None)
+    if not supports_tts_interruption():
+        user_input.pop(CONF_SUPPORT_BARGE_IN, None)
     return user_input
 
 
@@ -245,13 +250,6 @@ def _needs_model_specific_refresh(user_input: dict[str, Any]) -> bool:
         supports_affective_dialog(model)
         and CONF_AFFECTIVE_DIALOG not in user_input
     )
-
-
-def _barge_in_errors(user_input: dict[str, Any]) -> dict[str, str]:
-    """Reject barge-in when Core cannot propagate an interruption."""
-    if user_input.get(CONF_SUPPORT_BARGE_IN) and not supports_tts_interruption():
-        return {"base": "barge_in_unsupported"}
-    return {}
 
 
 class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -296,18 +294,6 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     },
                 )
             user_input = _strip_unsupported_settings(user_input)
-            if errors := _barge_in_errors(user_input):
-                return self.async_show_form(
-                    step_id="provider",
-                    data_schema=_provider_schema(selected_provider, user_input),
-                    errors=errors,
-                    description_placeholders={
-                        "provider": {
-                            PROVIDER_OPENAI: "OpenAI",
-                            PROVIDER_PERSONAPLEX: "fal.ai PersonaPlex",
-                        }.get(selected_provider, "Google Gemini")
-                    },
-                )
             user_input[CONF_PROVIDER] = selected_provider
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
             title = {
@@ -338,12 +324,6 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     data_schema=_provider_schema(provider, user_input),
                 )
             user_input = _strip_unsupported_settings(user_input)
-            if errors := _barge_in_errors(user_input):
-                return self.async_show_form(
-                    step_id="reconfigure",
-                    data_schema=_provider_schema(provider, user_input),
-                    errors=errors,
-                )
             user_input[CONF_PROVIDER] = provider
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
             return self.async_update_reload_and_abort(
@@ -379,12 +359,6 @@ class GeminiLiveOptionsFlowHandler(config_entries.OptionsFlow):
                     data_schema=_provider_schema(provider, user_input),
                 )
             user_input = _strip_unsupported_settings(user_input)
-            if errors := _barge_in_errors(user_input):
-                return self.async_show_form(
-                    step_id="init",
-                    data_schema=_provider_schema(provider, user_input),
-                    errors=errors,
-                )
             user_input[CONF_PROVIDER] = provider
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
             return self.async_create_entry(title="", data=user_input)

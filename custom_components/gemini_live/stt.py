@@ -33,6 +33,7 @@ from homeassistant.helpers.issue_registry import (
     async_delete_issue,
 )
 
+from .compat import supports_tts_interruption
 from .gemini import GeminiLiveClient, async_create_gemini_client
 from .live import LiveConfig, LiveTool, LiveToolResponse
 from .const import (
@@ -1461,7 +1462,7 @@ class LiveModelSTT(SpeechToTextEntity):
                 CONF_SUPPORT_BARGE_IN,
                 DEFAULT_SUPPORT_BARGE_IN,
             )
-        )
+        ) and supports_tts_interruption()
         if self.supports_search_grounding:
             encourage_web_search = bool(
                 config.get(

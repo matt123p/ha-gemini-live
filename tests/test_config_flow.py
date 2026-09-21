@@ -4,7 +4,6 @@ from typing import Any
 
 import voluptuous as vol
 from gemini_live.config_flow import (
-    _barge_in_errors,
     _needs_model_specific_refresh,
     _provider_schema,
     _strip_unsupported_settings,
@@ -119,14 +118,60 @@ def test_unsupported_model_settings_are_removed() -> None:
     assert CONF_THINKING_LEVEL not in result
 
 
-def test_schema_shows_barge_in_for_both_providers() -> None:
+def test_schema_shows_barge_in_for_both_providers(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "gemini_live.config_flow.supports_tts_interruption", lambda: True
+    )
     for provider in (PROVIDER_GEMINI, PROVIDER_OPENAI):
         schema = _provider_schema(provider)
         keys = [marker.schema for marker in schema.schema]
         assert CONF_SUPPORT_BARGE_IN in keys
 
 
-def test_barge_in_defaults_to_false() -> None:
+def test_barge_in_hidden_when_core_lacks_interruption_support(
+    monkeypatch,
+) -> None:
+    """Hide the barge-in option entirely when Core cannot interrupt TTS."""
+    monkeypatch.setattr(
+        "gemini_live.config_flow.supports_tts_interruption", lambda: False
+    )
+
+    for provider in (PROVIDER_GEMINI, PROVIDER_OPENAI):
+        schema = _provider_schema(provider)
+        keys = [marker.schema for marker in schema.schema]
+        assert CONF_SUPPORT_BARGE_IN not in keys
+
+        result = schema(
+            {
+                CONF_API_KEY: "key",
+                CONF_MODEL: _available_models(schema)[0],
+                CONF_VOICE: _VALID_VOICE[provider],
+            }
+        )
+        assert CONF_SUPPORT_BARGE_IN not in result
+
+
+def test_barge_in_setting_stripped_without_core_interruption_support(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "gemini_live.config_flow.supports_tts_interruption", lambda: False
+    )
+
+    result = _strip_unsupported_settings(
+        {
+            CONF_MODEL: "gemini-3.8-live",
+            CONF_SUPPORT_BARGE_IN: True,
+        }
+    )
+
+    assert CONF_SUPPORT_BARGE_IN not in result
+
+
+def test_barge_in_defaults_to_false(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "gemini_live.config_flow.supports_tts_interruption", lambda: True
+    )
     for provider in (PROVIDER_GEMINI, PROVIDER_OPENAI):
         schema = _provider_schema(provider)
 
@@ -142,7 +187,10 @@ def test_barge_in_defaults_to_false() -> None:
         assert DEFAULT_SUPPORT_BARGE_IN is False
 
 
-def test_barge_in_setting_persists_through_reconfigure() -> None:
+def test_barge_in_setting_persists_through_reconfigure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "gemini_live.config_flow.supports_tts_interruption", lambda: True
+    )
     for provider in (PROVIDER_GEMINI, PROVIDER_OPENAI):
         schema = _provider_schema(provider, {CONF_SUPPORT_BARGE_IN: True})
 
@@ -155,20 +203,6 @@ def test_barge_in_setting_persists_through_reconfigure() -> None:
         )
 
         assert result[CONF_SUPPORT_BARGE_IN] is True
-
-
-def test_barge_in_requires_core_interruption_support(
-    monkeypatch,
-) -> None:
-    """Reject enabling barge-in unless Core has the complete interrupt path."""
-    monkeypatch.setattr(
-        "gemini_live.config_flow.supports_tts_interruption", lambda: False
-    )
-
-    assert _barge_in_errors({CONF_SUPPORT_BARGE_IN: True}) == {
-        "base": "barge_in_unsupported"
-    }
-    assert _barge_in_errors({CONF_SUPPORT_BARGE_IN: False}) == {}
 
 
 def test_affective_dialog_only_shown_for_supported_models() -> None:
