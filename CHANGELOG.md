@@ -2,25 +2,20 @@
 
 All notable changes to Gemini Live for Home Assistant are documented here.
 
-## Unreleased
+## 1.0.9
 
-- Fixed Gemini 3.8 sessions with affective dialog failing every voice turn with
-  "Request contains an invalid argument" (websocket close 1007) by sending
-  `enable_affective_dialog` inside `generation_config`, where the v1beta Live
-  API wire proto actually defines it, instead of at the top level of the setup
-  message.
+- Corrected Affective Dialog support: the option is now offered only for
+  `gemini-2.5-flash-native-audio-preview-12-2025`, the only configured model
+  that accepts it. The integration uses the `v1beta` API and sends
+  `enable_affective_dialog` inside `generation_config`. The option is removed
+  from Gemini 3.8 and Gemini 3.1 configurations because those models reject it
+  with websocket close code 1007.
 - Barge-in no longer fails setup on Home Assistant Core builds without TTS
   interruption support. The option is hidden from the config and options flows,
   any stored barge-in setting is ignored at runtime, and the previous
   `ConfigEntryError` was removed.
-- Fixed Gemini Live rejecting the affective-dialog setup with
-  "Request contains an invalid argument" (websocket close 1007) by pinning the
-  client to the `v1beta` API version when affective dialog is enabled, which
-  the Live API requires for `enable_affective_dialog`.
-- Extended the affective-dialog switch to `gemini-3.8-live-extended-thinking`;
-  per the Live API documentation only Gemini 3.1 Flash Live lacks support.
-- Fixed affective-dialog sessions failing SDK validation by sending
-  `enable_affective_dialog` at the top level of the Gemini Live config.
+- Barge-in playback now requests uncached Core TTS streaming so interruption
+  control messages reach compatible satellites immediately.
 - Added `gemini-3.8-live-extended-thinking`, including its asynchronous tool
   declarations, configurable low/medium/high thinking level, and
   multi-utterance interaction lifecycle, and changed model selection to a
@@ -55,10 +50,8 @@ All notable changes to Gemini Live for Home Assistant are documented here.
   synchronous (blocking) function calling, preserving the integration's
   request/execute/respond flow on models that default to asynchronous
   execution.
-- Added an Affective dialog switch for Gemini 3.8 models. When enabled, the
-  model reads the tone and emotion in the user's voice and adapts its own
-  speaking style to match. The switch is hidden for models that do not
-  support it.
+- Added the initial Affective Dialog option. Model compatibility was corrected
+  in version 1.0.9.
 - Embedded the unique per-turn id in the pipeline placeholder whenever no
   input transcript is available, so Home Assistant's TTS message cache can no
   longer replay an earlier turn's audio.
