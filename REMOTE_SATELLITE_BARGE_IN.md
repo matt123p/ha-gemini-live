@@ -2,7 +2,7 @@
 
 This document describes the end-to-end barge-in path used by
 `ha-gemini-live`, the required Home Assistant Core changes, and the behavior
-expected from Wyoming and ESPHome voice satellites.
+required from an ESPHome voice satellite.
 
 Barge-in lets a user speak while the assistant is playing a response. The old
 response must stop promptly, microphone audio must continue reaching the live
@@ -14,10 +14,10 @@ session.
 Barge-in requires all of the following:
 
 - the **Support barge-in** option enabled in `ha-gemini-live`;
-- Home Assistant Core with the TTS interruption path;
+- Home Assistant Core with the TTS interruption API and ESPHome playback path;
 - a full-duplex satellite that continues microphone capture during playback;
 - effective acoustic echo cancellation (AEC), or headphones; and
-- satellite playback that reacts correctly to an interrupted audio segment.
+- ESPHome firmware that advertises and implements the playback-flush extension.
 
 The integration checks for the required Core API before allowing barge-in to be
 enabled. Specifically, Core must provide:
@@ -32,25 +32,20 @@ Assistant Core.
 
 ## End-to-end interruption path
 
-The implemented path is:
-
 ```text
 User speaks during assistant playback
     -> satellite continues sending microphone PCM
     -> Gemini/OpenAI detects speech and interrupts generation
     -> ha-gemini-live discards queued model audio
     -> Gemini Live TTS invokes Core's on_audio_interrupt callback
-    -> Core forwards the callback directly to the consuming satellite
-    -> Wyoming: AudioStop followed by AudioStart
-       ESPHome: TTS_STREAM_END followed by TTS_STREAM_START
-    -> satellite purges old playback
+    -> Core sends TTS_STREAM_START with {"flush": "1"}
+    -> ESPHome synchronously purges old playback without ending the response
     -> replacement model audio continues in the same TTS response
 ```
 
 The provider is authoritative about whether an interruption occurred. Local
-speech detection on the satellite is still useful for stopping its speaker with
-the lowest possible latency, but it does not replace the provider-to-Core
-interruption path.
+speech detection on the satellite can stop its speaker sooner, but it does not
+replace the provider-to-Core interruption path.
 
 ## Responsibilities
 
@@ -74,22 +69,24 @@ barge-in must not implicitly enable or display the assistant transcript.
 The Core patch:
 
 - lets an entity opt in through `supports_audio_interrupt`;
-- bypasses memory and disk caches entirely for that entity's responses;
-- starts generation when a single interrupt-capable satellite consumes the stream;
-- passes the satellite's `on_audio_interrupt` callback directly to the engine; and
-- converts that notification into the native satellite transport boundaries
-  described below.
+- preserves the raw input until either a live or cached consumer claims it;
+- bypasses memory and disk caches for one live interrupt-capable consumer;
+- keeps URL, media-player, VoIP, and unsupported-satellite consumers on the
+  normal cached path;
+- passes the satellite's `on_audio_interrupt` callback directly to the engine;
+- passes the consumer's requested output options to the TTS engine; and
+- prevents a competing consumer from starting a second model session.
 
-Interruptible streams require native output: this integration supplies 16 kHz,
-mono, 16-bit PCM WAV. Core rejects unsupported output options or an extension
-mismatch instead of routing the stream through ffmpeg. Buffered consumers such
-as VoIP, HTTP/media-player playback, and repeated consumers are not supported
-with barge-in enabled. Ordinary TTS caching and conversion remain unchanged
-when barge-in is disabled.
+An interruptible engine must return PCM WAV, preserve the original WAV header
+across interruptions, discard its pending old-response audio before invoking
+the callback, and yield only replacement audio afterward. Because the live path
+bypasses Core's normal audio conversion, the engine must advertise and honor
+the requested format, sample rate, channel count, and sample width. ESPHome
+currently requests 16 kHz, mono, 16-bit PCM WAV, which `ha-gemini-live` emits.
 
-ESPHome speaker playback starts at `INTENT_PROGRESS` for interruptible streams,
-using the token supplied at `RUN_START`. This drains live audio while the
-conversation is still producing text and avoids waiting until `TTS_END`.
+ESPHome playback starts at `INTENT_PROGRESS` for interruptible streams, using
+the token supplied at `RUN_START`, only when the device advertises both speaker
+support and the flush extension. Other consumers retain the previous behavior.
 
 ### Remote satellite
 
@@ -97,19 +94,58 @@ The satellite must:
 
 - capture and transmit microphone audio while speaker audio is playing;
 - run AEC so assistant audio is not mistaken for user speech;
-- stop and purge old playback when the interruption boundary arrives;
-- accept the new stream-start boundary and replacement audio;
+- advertise feature bit `1 << 7` in its voice-assistant feature flags;
+- recognize `VOICE_ASSISTANT_TTS_STREAM_START` with `flush=1` as a flush of the
+  current response, not the start of a separate response;
+- synchronously purge all old playback and AEC reference data;
 - keep the overall Assist pipeline alive across the interruption; and
-- report playback completion only for the final response segment.
+- report playback completion only after the final stream end.
+
+## ESPHome protocol extension
+
+The extension uses an existing event with new data:
+
+```text
+VOICE_ASSISTANT_TTS_STREAM_START {"flush": "1"}
+<replacement TTS audio>
+```
+
+Core sends this only to a device whose voice-assistant feature flags contain
+bit `1 << 7`. Firmware without the bit stays on the pre-existing cached TTS
+path and never receives a mid-response flush. This capability gate preserves
+legacy ESPHome behavior.
+
+The ESPHome voice assistant must inspect the start-event data and synchronously
+clear the speaker playback queue when `flush` is `1`. The clear must happen in
+the voice-assistant event handler before later audio packets can be consumed; a
+deferred YAML automation is not sufficient to guarantee ordering.
+
+For the `aec_speexdsp` speaker, the handler should synchronously call
+`clear_playback()`, which clears the playback and AEC reference buffers and
+resets resampler state. The flush event must not finish the announcement or
+Assist response. Core sends the ordinary `VOICE_ASSISTANT_TTS_STREAM_END` once,
+after the final audio.
+
+Core deliberately does not send an intermediate `TTS_STREAM_END`. Existing
+ESPHome firmware treats it as end-of-stream and drains buffered audio rather
+than discarding it.
+
+## Unsupported transports
+
+Wyoming interruptible playback is not part of the current Core patch.
+Wyoming's `AudioStop` means end-of-audio and may produce `Played`; using it as a
+flush can finish the Home Assistant response while replacement audio is still
+playing. A future Wyoming implementation needs an explicit,
+capability-negotiated flush operation before it can safely use this path.
 
 ## Microphone and echo cancellation
 
 Capture and playback must run in separate tasks or threads. Receiving assistant
 audio must never pause or close microphone capture.
 
-Send 16 kHz, 16-bit, mono PCM for the complete pipeline run. A microphone
-packet duration of roughly 20–40 ms is recommended; larger packets add directly
-to interruption latency.
+Send 16 kHz, 16-bit, mono PCM from the microphone for the complete pipeline
+run. A microphone packet duration of roughly 20-40 ms is recommended; larger
+packets add directly to interruption latency.
 
 Without effective AEC, provider VAD can hear the assistant's speaker output and
 cause repeated self-interruptions. Feed the exact rendered speaker samples into
@@ -126,72 +162,16 @@ When local speech is detected during playback, a capable satellite may stop and
 purge playback immediately rather than waiting for the provider round trip. It
 must continue transmitting microphone audio.
 
-When the Core interruption boundary arrives, the satellite must:
+When the Core flush-marked stream-start event arrives, the satellite must:
 
 1. stop the audio device;
-2. clear device/DMA, decoder, jitter, and application playback queues;
-3. reset timestamps and decoder state for the new segment;
+2. clear device/DMA, decoder, jitter, application, and AEC reference queues;
+3. reset playback and resampler state for the replacement audio;
 4. continue microphone transmission; and
-5. accept replacement audio after the new start event.
+5. accept replacement audio as part of the same TTS response.
 
-The underlying Home Assistant TTS result remains open. The stop/start events
-divide that result into playback segments; they do not end the Assist pipeline.
-
-These are standard transport events used in a new mid-response pattern, not new
-protocol event types. Existing satellite firmware that treats every stop/end as
-the end of the entire Assist response must be updated or configured to recognize
-the immediately following start event.
-
-## Wyoming satellites
-
-For Wyoming, an interruption is represented as:
-
-```text
-AudioStop(timestamp=<old segment duration>)
-AudioStart(rate=<same rate>, width=<same width>, channels=<same channels>, timestamp=0)
-AudioChunk(... replacement audio ...)
-```
-
-Core sends `AudioStop` and `AudioStart` as one locked sequence, so an
-`AudioChunk` cannot be interleaved between the two boundary events.
-
-A compatible Wyoming satellite must:
-
-- purge the old playback queue on the intermediate `AudioStop`;
-- treat the immediately following `AudioStart` as a new segment of the same
-  Assist response;
-- reset its playback timestamp to zero for the new segment;
-- continue sending microphone `AudioChunk` events throughout; and
-- avoid sending `Played` for an interrupted segment.
-
-Send `Played` only after the final `AudioStop` has actually completed playback.
-An early `Played` makes Home Assistant mark the entire TTS response as finished,
-even though replacement audio is still coming.
-
-Because Wyoming does not yet carry a distinct interruption event or response
-identifier, the back-to-back `AudioStop`/`AudioStart` pair is the interruption
-marker. A client that normally sends `Played` immediately after every
-`AudioStop` needs a short look-ahead/grace period so it can recognize the
-following `AudioStart` and suppress the intermediate completion.
-
-## ESPHome voice assistants
-
-For ESPHome, Core sends:
-
-```text
-VOICE_ASSISTANT_TTS_STREAM_END
-VOICE_ASSISTANT_TTS_STREAM_START
-<replacement TTS audio>
-```
-
-Core also resets its stream timing and duration accounting when the new segment
-starts.
-
-The ESPHome voice assistant must purge buffered audio on the intermediate
-`TTS_STREAM_END`, accept the following `TTS_STREAM_START`, and continue
-microphone capture. It must not report the overall announcement or Assist
-response as finished for the intermediate end event; completion belongs to the
-final stream end.
+The underlying Home Assistant TTS result remains open. The flush event neither
+closes nor restarts the Assist pipeline.
 
 ## Suggested satellite state machine
 
@@ -211,9 +191,8 @@ SPEAKING
         -> LISTENING
 
 SPEAKING or LISTENING
-    Core interruption stop/end arrives
+    Core flush-marked stream-start arrives
         -> purge old playback
-    Core interruption start arrives
         -> prepare a clean replacement segment
         -> PROCESSING
 
@@ -222,7 +201,7 @@ PROCESSING
         -> SPEAKING
 
 SPEAKING
-    final stop/end and playback completion
+    final stream-end and playback completion
         -> IDLE or LISTENING, according to pipeline continuation
 ```
 
@@ -235,15 +214,15 @@ Suggested starting targets:
 
 | Component | Target |
 |---|---:|
-| Microphone packet duration | 20–40 ms |
-| Local playback queue | 40–100 ms |
-| Speech-start debounce | 40–100 ms |
+| Microphone packet duration | 20-40 ms |
+| Local playback queue | 40-100 ms |
+| Speech-start debounce | 40-100 ms |
 | Local playback purge after speech start | Under 50 ms |
 | Integration response-audio buffer | About 200 ms |
 
-The integration deliberately bounds its response-audio queue. On interruption,
-it clears that queue, while Core clears its own active TTS consumer queues. The
-satellite boundary then clears audio already delivered to the remote device.
+The integration bounds its response-audio queue. On interruption it clears
+that queue, Core clears parser, pacing, and pending output state, and the
+satellite flush clears audio already delivered to the remote device.
 
 Smaller buffers reduce audible overrun after interruption but increase
 sensitivity to network jitter and scheduling delays. Measure latency on the
@@ -251,15 +230,16 @@ actual satellite hardware.
 
 ## Compatibility behavior
 
-| Barge-in | Core interruption API | Result |
-|---|---|---|
-| Disabled | Missing or present | Normal legacy TTS behavior |
-| Enabled | Present | Full interruption propagation to supported satellites |
-| Enabled | Missing | Configuration is rejected and setup is blocked |
+| Barge-in | Core API | ESPHome flush bit | Result |
+|---|---|---|---|
+| Disabled | Missing or present | Missing or present | Normal legacy TTS behavior |
+| Enabled | Present | Present | Live interruptible playback and remote flush |
+| Enabled | Present | Missing | Normal cached satellite playback; no remote barge-in |
+| Enabled | Missing | Any | Configuration is rejected and setup is blocked |
 
-The current custom Core image and patch are release-specific. Do not copy the
-patched Core files into a different Home Assistant version without rebasing and
-testing the patch against that release.
+The custom Core image and patch are release-specific. Do not copy patched Core
+files into a different Home Assistant version without rebasing and testing the
+patch against that release.
 
 ## Failure handling
 
@@ -282,19 +262,20 @@ Test with response transcription both enabled and disabled.
 - Speaker loopback alone does not trigger interruption.
 - Real user speech interrupts the provider response.
 - The integration discards its queued old-response audio.
-- Core discards audio queued for active TTS consumers.
-- Wyoming receives an intermediate `AudioStop` followed by `AudioStart`.
-- ESPHome receives an intermediate `TTS_STREAM_END` followed by
-  `TTS_STREAM_START`.
+- A capable ESPHome device receives `TTS_STREAM_START` with `flush=1`.
+- An incapable ESPHome device uses the normal cached path and receives no
+  mid-response flush.
 - The satellite purges old buffered playback at the interruption boundary.
-- No intermediate Wyoming `Played` or ESPHome completion is reported.
+- No intermediate `TTS_STREAM_END` or ESPHome completion is reported.
 - Replacement audio starts with reset timing and is not clipped.
-- The final stop/end produces the normal playback-completed indication.
+- Audio with a mismatched rate, channel count, or sample width is rejected
+  rather than silently converted in the live path.
+- The final stream end produces the normal playback-completed indication.
 - Enabling barge-in does not enable response transcription.
 - Repeated interruptions do not leak tasks, callbacks, buffers, or response
   state.
 
 For an end-to-end test, request a long answer and interrupt it after several
 words. Verify that old speech stops, microphone upload continues, the transport
-emits the expected stop/start boundary, replacement speech plays, and the same
+emits the flush-marked start event, replacement speech plays, and the same
 live-model session retains its conversation context.
