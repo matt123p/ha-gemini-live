@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_LLM_HASS_API
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import chat_session, llm
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -63,6 +64,7 @@ from .runtime import AudioStream, new_conversation_id
 from .utils import pcm_to_wav, resample_24k_to_16k
 
 _LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -178,15 +180,28 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
         transcribe_output = bool(
             config.get(self.transcribe_config_key, self.default_transcribe)
         )
-        show_text = bool(
-            config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT)
-        )
+        show_text = bool(config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT))
         system_instruction = custom_instruction or self.default_system_instruction
+
+        api_ids = config.get(CONF_LLM_HASS_API, [llm.LLM_API_ASSIST])
+        if not api_ids:
+            live_tools = _add_end_conversation_tool([])
+            system_instruction = _add_search_tool_instruction(
+                system_instruction,
+                [],
+                encourage_web_search,
+                native_search_grounding=self.supports_search_grounding,
+            )
+            system_instruction = _add_end_conversation_instruction(system_instruction)
+            if not transcribe_output and show_text:
+                system_instruction = _add_show_text_instruction(system_instruction)
+                live_tools = _add_show_text_tool(live_tools)
+            return None, live_tools, system_instruction
 
         try:
             llm_api = await llm.async_get_api(
                 hass=self.hass,
-                api_id=llm.LLM_API_ASSIST,
+                api_id=api_ids,
                 llm_context=llm_context,
             )
             api_prompt = llm_api.api_prompt
@@ -217,13 +232,14 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                 live_tools = _add_show_text_tool(live_tools)
 
             _LOGGER.debug(
-                "Conversation text path loaded %d HA Assist tools",
+                "Conversation text path loaded %d Home Assistant LLM tools",
                 len(live_tools),
             )
             return llm_api, live_tools, system_instruction
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning(
-                "Could not load HA Assist LLM API for text path: %s. Tools will be unavailable.",
+                "Could not load selected Home Assistant LLM APIs for text "
+                "path: %s. Tools will be unavailable.",
                 exc,
             )
             live_tools = _add_end_conversation_tool([])
@@ -262,9 +278,7 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
         transcribe_output = bool(
             config.get(self.transcribe_config_key, self.default_transcribe)
         )
-        show_text = bool(
-            config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT)
-        )
+        show_text = bool(config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT))
 
         if not api_key:
             _LOGGER.error("API key not configured for %s", self.integration_name)
@@ -364,7 +378,9 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                                             )
                                         )
                                     except Exception as err:  # noqa: BLE001
-                                        _LOGGER.error("Tool %s failed: %s", tool_name, err)
+                                        _LOGGER.error(
+                                            "Tool %s failed: %s", tool_name, err
+                                        )
                                         tool_result = {"error": str(err)}
                                 else:
                                     tool_result = {"error": "HA LLM API not available"}
@@ -408,7 +424,9 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                                 continue
                             break
         except TimeoutError:
-            _LOGGER.error("[turn=%s] %s text path timed out", turn_id, self.integration_name)
+            _LOGGER.error(
+                "[turn=%s] %s text path timed out", turn_id, self.integration_name
+            )
             return None
         except Exception as exc:  # noqa: BLE001
             if _is_connection_closed_ok(exc):
@@ -528,11 +546,14 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
         else:
             session_manager.reset_conversation(conversation_id)
             user_transcript = input_text
-            assistant_text = await self._async_process_text_live(
-                input_text,
-                user_input,
-                conversation_id,
-            ) or self.error_response
+            assistant_text = (
+                await self._async_process_text_live(
+                    input_text,
+                    user_input,
+                    conversation_id,
+                )
+                or self.error_response
+            )
             chat_log.async_add_assistant_content_without_tools(
                 conversation.AssistantContent(
                     agent_id=self.entity_id,

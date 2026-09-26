@@ -2,6 +2,14 @@
 
 All notable changes to Gemini Live for Home Assistant are documented here.
 
+## Unreleased
+
+- Added a multi-select for Home Assistant LLM APIs to setup, reconfigure, and
+  options screens. Third-party APIs such as AI Memory's Memory Management can
+  now be enabled alongside Assist, and their tools and prompt are passed to
+  both voice and typed live-model conversations. Assist is selected by default
+  for new entries and existing entries upgraded from 1.0.9.
+
 ## 1.0.9
 
 - Corrected Affective Dialog support: the option is now offered only for

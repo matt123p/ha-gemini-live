@@ -23,6 +23,7 @@ from homeassistant.components.stt import (
     SpeechToTextEntity,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_LLM_HASS_API
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import chat_session, llm
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -122,9 +123,7 @@ _PREPAYMENT_CREDITS_USER_MESSAGE = (
 
 _OPENAI_NO_CREDITS_ERROR_MARKER = "no credits remaining"
 _OPENAI_NO_CREDITS_ISSUE_PREFIX = "openai_no_credits"
-_OPENAI_NO_CREDITS_URL = (
-    "https://platform.openai.com/settings/organization/billing/"
-)
+_OPENAI_NO_CREDITS_URL = "https://platform.openai.com/settings/organization/billing/"
 _OPENAI_NO_CREDITS_USER_MESSAGE = (
     "GPT Realtime is unavailable because your OpenAI account has no credits "
     f"remaining. Please go to {_OPENAI_NO_CREDITS_URL} to add credits."
@@ -194,7 +193,6 @@ _SHOW_TEXT_TOOL = LiveTool(
 )
 
 
-
 def _is_search_tool_name(name: str) -> bool:
     """Return whether a tool name indicates web-search capability."""
     lowered_name = name.lower()
@@ -241,6 +239,7 @@ def _openai_no_credits_issue_id(entry_id: str) -> str:
 # ---------------------------------------------------------------------------
 # Schema / tool helpers
 # ---------------------------------------------------------------------------
+
 
 def _format_tool_for_live(
     tool: llm.Tool,
@@ -319,7 +318,6 @@ def _add_show_text_instruction(system_instruction: str) -> str:
     return f"{system_instruction}\n\n{_SHOW_TEXT_INSTRUCTION}"
 
 
-
 def _add_search_tool_instruction(
     system_instruction: str,
     tools: list[llm.Tool],
@@ -327,9 +325,7 @@ def _add_search_tool_instruction(
     native_search_grounding: bool = False,
 ) -> str:
     """Tell the model when to use native or exposed web search."""
-    has_exposed_search_tool = any(
-        _is_search_tool_name(tool.name) for tool in tools
-    )
+    has_exposed_search_tool = any(_is_search_tool_name(tool.name) for tool in tools)
     if not encourage_web_search or not (
         native_search_grounding or has_exposed_search_tool
     ):
@@ -351,6 +347,7 @@ def _validate_tool_results(value: Any) -> Any:
 # ---------------------------------------------------------------------------
 # PCM diagnostics helper
 # ---------------------------------------------------------------------------
+
 
 def _analyse_pcm(pcm: bytes, sample_rate: int = 16000) -> str:
     """Return a one-line diagnostic string for a raw 16-bit signed mono PCM buffer."""
@@ -387,6 +384,7 @@ def _analyse_pcm(pcm: bytes, sample_rate: int = 16000) -> str:
 # Platform setup
 # ---------------------------------------------------------------------------
 
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -402,6 +400,7 @@ async def async_setup_entry(
 # ---------------------------------------------------------------------------
 # STT Entity
 # ---------------------------------------------------------------------------
+
 
 class LiveModelSTT(SpeechToTextEntity):
     """Shared speech-to-text pipeline for realtime model providers."""
@@ -524,43 +523,52 @@ class LiveModelSTT(SpeechToTextEntity):
         llm_api: llm.APIInstance | None = None
         ha_tools: list[llm.Tool] = []
         system_instruction = custom_instruction or self.default_system_instruction
+        config = {**self.entry.data, **self.entry.options}
+        api_ids = config.get(CONF_LLM_HASS_API, [llm.LLM_API_ASSIST])
 
-        try:
-            llm_api = await llm.async_get_api(
-                hass=self.hass,
-                api_id=llm.LLM_API_ASSIST,
-                llm_context=llm.LLMContext(
-                    platform=self.integration_domain,
-                    context=(
-                        pipeline_context
-                        if pipeline_context is not None
-                        else Context()
+        if api_ids:
+            try:
+                llm_api = await llm.async_get_api(
+                    hass=self.hass,
+                    api_id=api_ids,
+                    llm_context=llm.LLMContext(
+                        platform=self.integration_domain,
+                        context=(
+                            pipeline_context
+                            if pipeline_context is not None
+                            else Context()
+                        ),
+                        language=metadata.language or "en",
+                        assistant="conversation",
+                        device_id=device_id,
                     ),
-                    language=metadata.language or "en",
-                    assistant="conversation",
-                    device_id=device_id,
-                ),
-            )
-            ha_tools = llm_api.tools
-
-            api_prompt = llm_api.api_prompt
-            if custom_instruction:
-                system_instruction = f"{custom_instruction}\n\n{api_prompt}"
-            else:
-                system_instruction = (
-                    self.default_system_instruction + "\n\n" + api_prompt
                 )
-            system_instruction = _add_search_tool_instruction(
-                system_instruction,
-                ha_tools,
-                encourage_web_search and not self.supports_search_grounding,
-            )
-            _LOGGER.debug("Loaded HA Assist LLM API with %d tools", len(ha_tools))
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.warning(
-                "Could not load HA Assist LLM API: %s. Tools will be unavailable.",
-                exc,
-            )
+                ha_tools = llm_api.tools
+
+                api_prompt = llm_api.api_prompt
+                if custom_instruction:
+                    system_instruction = f"{custom_instruction}\n\n{api_prompt}"
+                else:
+                    system_instruction = (
+                        self.default_system_instruction + "\n\n" + api_prompt
+                    )
+                system_instruction = _add_search_tool_instruction(
+                    system_instruction,
+                    ha_tools,
+                    encourage_web_search and not self.supports_search_grounding,
+                )
+                _LOGGER.debug(
+                    "Loaded selected Home Assistant LLM APIs with %d tools",
+                    len(ha_tools),
+                )
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Could not load selected Home Assistant LLM APIs: %s. "
+                    "Tools will be unavailable.",
+                    exc,
+                )
+        else:
+            _LOGGER.debug("No Home Assistant LLM APIs selected")
 
         if self.supports_search_grounding:
             system_instruction = _add_search_tool_instruction(
@@ -590,9 +598,7 @@ class LiveModelSTT(SpeechToTextEntity):
             [definition.name for definition in live_tools],
         )
 
-        _LOGGER.warning(
-            "[turn=%s] creating provider client", turn_id
-        )
+        _LOGGER.warning("[turn=%s] creating provider client", turn_id)
         client = await self._async_create_client(api_key)
         _LOGGER.warning(
             "[turn=%s] provider client created tool_count=%d system_instruction_chars=%d",
@@ -612,9 +618,7 @@ class LiveModelSTT(SpeechToTextEntity):
                     CONF_AFFECTIVE_DIALOG, DEFAULT_AFFECTIVE_DIALOG
                 )
             ),
-            search_grounding=(
-                self.supports_search_grounding and encourage_web_search
-            ),
+            search_grounding=(self.supports_search_grounding and encourage_web_search),
             thinking_level=(
                 {**self.entry.data, **self.entry.options}.get(
                     CONF_THINKING_LEVEL,
@@ -638,9 +642,7 @@ class LiveModelSTT(SpeechToTextEntity):
             live_config.thinking_level,
         )
         if support_barge_in:
-            _LOGGER.debug(
-                "[turn=%s] barge-in enabled for provider session", turn_id
-            )
+            _LOGGER.debug("[turn=%s] barge-in enabled for provider session", turn_id)
 
         native_audio_model = "native-audio" in (model or "")
         _LOGGER.warning(
@@ -723,10 +725,7 @@ class LiveModelSTT(SpeechToTextEntity):
                     async for chunk in stream:
                         if not chunk:
                             continue
-                        if (
-                            not support_barge_in
-                            and gemini_replied.is_set()
-                        ):
+                        if not support_barge_in and gemini_replied.is_set():
                             _LOGGER.warning(
                                 "[turn=%s] send_audio stopped because the model started replying",
                                 turn_id,
@@ -786,9 +785,7 @@ class LiveModelSTT(SpeechToTextEntity):
                             _analyse_pcm(b"".join(pcm_for_diag)),
                         )
 
-                    if audio_sent and (
-                        support_barge_in or not gemini_replied.is_set()
-                    ):
+                    if audio_sent and (support_barge_in or not gemini_replied.is_set()):
                         _LOGGER.debug("[turn=%s] signalling audio stream end", turn_id)
                         await session.end_audio()
                 except asyncio.CancelledError:
@@ -831,9 +828,7 @@ class LiveModelSTT(SpeechToTextEntity):
                                 turn_id,
                             )
                         if response.user_activity_stopped:
-                            _LOGGER.debug(
-                                "[turn=%s] user activity stopped", turn_id
-                            )
+                            _LOGGER.debug("[turn=%s] user activity stopped", turn_id)
                         if response.interrupted:
                             # An interrupted generation is followed by a
                             # replacement response in the same provider turn.
@@ -907,7 +902,9 @@ class LiveModelSTT(SpeechToTextEntity):
                                             tool_input
                                         )
                                     except Exception as err:  # noqa: BLE001
-                                        _LOGGER.error("Tool %s failed: %s", tool_name, err)
+                                        _LOGGER.error(
+                                            "Tool %s failed: %s", tool_name, err
+                                        )
                                         tool_result = {"error": str(err)}
                                 else:
                                     tool_result = {"error": "HA LLM API not available"}
@@ -1085,12 +1082,15 @@ class LiveModelSTT(SpeechToTextEntity):
                         pass
 
                 user_text = (
-                    "".join(input_transcript_parts).strip()
-                    or fallback_user_text
+                    "".join(input_transcript_parts).strip() or fallback_user_text
                 )
                 # HA persistently caches TTS audio by message. A per-turn message
                 # prevents it from replaying an earlier live-model audio stream.
-                if not transcribe_output and show_text and show_text_content is not None:
+                if (
+                    not transcribe_output
+                    and show_text
+                    and show_text_content is not None
+                ):
                     tts_message = show_text_content
                 else:
                     tts_message = f"{self.tts_placeholder} {turn_id}"
@@ -1290,9 +1290,7 @@ class LiveModelSTT(SpeechToTextEntity):
                 PipelineTurn(
                     conversation_id=conversation_id,
                     user_text=final_text,
-                    assistant_text=(
-                        assistant_text or fallback_user_text
-                    ),
+                    assistant_text=(assistant_text or fallback_user_text),
                     audio=b"",
                     complete_conversation=conversation_complete,
                 )
@@ -1362,17 +1360,13 @@ class LiveModelSTT(SpeechToTextEntity):
                         url_placeholder = "spending_cap_url"
                         reason = "the monthly spending cap was exceeded"
                     elif user_message == _PREPAYMENT_CREDITS_USER_MESSAGE:
-                        issue_id = _prepayment_credits_issue_id(
-                            self.entry.entry_id
-                        )
+                        issue_id = _prepayment_credits_issue_id(self.entry.entry_id)
                         issue_url = _PREPAYMENT_CREDITS_URL
                         translation_key = "spending_cap_exceeded"
                         url_placeholder = "spending_cap_url"
                         reason = "prepayment credits are depleted"
                     else:
-                        issue_id = _openai_no_credits_issue_id(
-                            self.entry.entry_id
-                        )
+                        issue_id = _openai_no_credits_issue_id(self.entry.entry_id)
                         issue_url = _OPENAI_NO_CREDITS_URL
                         translation_key = "openai_no_credits"
                         url_placeholder = "billing_url"
@@ -1469,12 +1463,15 @@ class LiveModelSTT(SpeechToTextEntity):
         user_requested_transcription = bool(
             config.get(self.transcribe_config_key, self.default_transcribe)
         )
-        support_barge_in = bool(
-            config.get(
-                CONF_SUPPORT_BARGE_IN,
-                DEFAULT_SUPPORT_BARGE_IN,
+        support_barge_in = (
+            bool(
+                config.get(
+                    CONF_SUPPORT_BARGE_IN,
+                    DEFAULT_SUPPORT_BARGE_IN,
+                )
             )
-        ) and supports_tts_interruption()
+            and supports_tts_interruption()
+        )
         if self.supports_search_grounding:
             encourage_web_search = bool(
                 config.get(
@@ -1489,12 +1486,8 @@ class LiveModelSTT(SpeechToTextEntity):
                     DEFAULT_ENCOURAGE_WEB_SEARCH,
                 )
             )
-        show_text = bool(
-            config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT)
-        )
-        self._set_detailed_logging(
-            bool(config.get(CONF_DETAILED_LOGGING, False))
-        )
+        show_text = bool(config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT))
+        self._set_detailed_logging(bool(config.get(CONF_DETAILED_LOGGING, False)))
 
         _LOGGER.warning(
             "[turn=%s] STT start language=%s model=%s voice=%s detailed_logging=%s barge_in=%s",

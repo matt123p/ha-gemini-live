@@ -1,8 +1,10 @@
 """Tests for the config flow schema's barge-in and affective dialog settings."""
 
+from types import SimpleNamespace
 from typing import Any
 
 import voluptuous as vol
+from homeassistant.const import CONF_LLM_HASS_API
 from gemini_live.config_flow import (
     _needs_model_specific_refresh,
     _provider_schema,
@@ -22,6 +24,7 @@ from gemini_live.const import (
     DEFAULT_SUPPORT_BARGE_IN,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
+    PROVIDER_PERSONAPLEX,
 )
 
 _VALID_VOICE = {PROVIDER_GEMINI: "Puck", PROVIDER_OPENAI: "marin"}
@@ -49,12 +52,8 @@ def test_gemini_models_use_dropdown_and_include_extended_thinking() -> None:
 
 
 def test_search_grounding_is_a_gemini_preference() -> None:
-    gemini_keys = [
-        marker.schema for marker in _provider_schema(PROVIDER_GEMINI).schema
-    ]
-    openai_keys = [
-        marker.schema for marker in _provider_schema(PROVIDER_OPENAI).schema
-    ]
+    gemini_keys = [marker.schema for marker in _provider_schema(PROVIDER_GEMINI).schema]
+    openai_keys = [marker.schema for marker in _provider_schema(PROVIDER_OPENAI).schema]
 
     assert CONF_SEARCH_GROUNDING in gemini_keys
     assert CONF_SEARCH_GROUNDING not in openai_keys
@@ -68,6 +67,107 @@ def test_search_grounding_is_a_gemini_preference() -> None:
     )
     assert result[CONF_SEARCH_GROUNDING] is DEFAULT_SEARCH_GROUNDING
     assert DEFAULT_SEARCH_GROUNDING is False
+
+
+def test_llm_api_selector_lists_registered_apis(monkeypatch) -> None:
+    """Offer every registered API, including third-party memory APIs."""
+    monkeypatch.setattr(
+        "gemini_live.config_flow.llm.async_get_apis",
+        lambda _hass: [
+            SimpleNamespace(id="assist", name="Assist"),
+            SimpleNamespace(id="memory", name="Memory Management"),
+        ],
+    )
+
+    schema = _provider_schema(
+        PROVIDER_GEMINI,
+        {CONF_LLM_HASS_API: ["assist", "memory"]},
+        SimpleNamespace(),
+    )
+    api_selector = _validator(schema, CONF_LLM_HASS_API)
+
+    assert api_selector.config["multiple"] is True
+    assert api_selector.config["options"] == [
+        {"value": "assist", "label": "Assist"},
+        {"value": "memory", "label": "Memory Management"},
+    ]
+    marker = next(
+        marker for marker in schema.schema if marker.schema == CONF_LLM_HASS_API
+    )
+    assert marker.description["suggested_value"] == ["assist", "memory"]
+
+
+def test_llm_api_selector_defaults_to_assist_and_ignores_missing_apis(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "gemini_live.config_flow.llm.async_get_apis",
+        lambda _hass: [SimpleNamespace(id="assist", name="Assist")],
+    )
+
+    schema = _provider_schema(PROVIDER_OPENAI, hass=SimpleNamespace())
+    marker = next(
+        marker for marker in schema.schema if marker.schema == CONF_LLM_HASS_API
+    )
+    assert marker.description["suggested_value"] == ["assist"]
+    assert marker.default() == ["assist"]
+
+    result = schema(
+        {
+            CONF_API_KEY: "key",
+            CONF_MODEL: "gpt-realtime-2.1",
+            CONF_VOICE: _VALID_VOICE[PROVIDER_OPENAI],
+        }
+    )
+    assert result[CONF_LLM_HASS_API] == ["assist"]
+
+    schema = _provider_schema(
+        PROVIDER_GEMINI,
+        {CONF_LLM_HASS_API: ["removed-api"]},
+        SimpleNamespace(),
+    )
+    marker = next(
+        marker for marker in schema.schema if marker.schema == CONF_LLM_HASS_API
+    )
+    assert marker.description["suggested_value"] == []
+
+
+def test_llm_api_selector_preserves_explicit_empty_selection(monkeypatch) -> None:
+    """Do not re-enable Assist after a user explicitly disables all APIs."""
+    monkeypatch.setattr(
+        "gemini_live.config_flow.llm.async_get_apis",
+        lambda _hass: [SimpleNamespace(id="assist", name="Assist")],
+    )
+
+    schema = _provider_schema(
+        PROVIDER_GEMINI,
+        {CONF_LLM_HASS_API: []},
+        SimpleNamespace(),
+    )
+    result = schema(
+        {
+            CONF_API_KEY: "key",
+            CONF_MODEL: "gemini-3.8-live",
+            CONF_VOICE: _VALID_VOICE[PROVIDER_GEMINI],
+        }
+    )
+
+    assert result[CONF_LLM_HASS_API] == []
+
+
+def test_llm_api_selector_hidden_for_provider_without_tools(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "gemini_live.config_flow.llm.async_get_apis",
+        lambda _hass: [SimpleNamespace(id="assist", name="Assist")],
+    )
+
+    keys = [
+        marker.schema
+        for marker in _provider_schema(
+            PROVIDER_PERSONAPLEX, hass=SimpleNamespace()
+        ).schema
+    ]
+    assert CONF_LLM_HASS_API not in keys
 
 
 def test_thinking_level_only_shown_for_extended_thinking() -> None:
@@ -220,9 +320,7 @@ def test_affective_dialog_only_shown_for_supported_models() -> None:
         keys = [marker.schema for marker in schema.schema]
         assert (CONF_AFFECTIVE_DIALOG in keys) is expected
 
-    schema = _provider_schema(
-        PROVIDER_OPENAI, {CONF_MODEL: "gpt-realtime-2.1"}
-    )
+    schema = _provider_schema(PROVIDER_OPENAI, {CONF_MODEL: "gpt-realtime-2.1"})
     keys = [marker.schema for marker in schema.schema]
     assert CONF_AFFECTIVE_DIALOG not in keys
 

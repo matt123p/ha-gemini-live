@@ -39,6 +39,7 @@ from homeassistant.components.stt import (
     SpeechResult,
     SpeechResultState,
 )
+from homeassistant.const import CONF_LLM_HASS_API
 from homeassistant.core import Context
 from homeassistant.helpers.issue_registry import DATA_REGISTRY as DATA_ISSUE_REGISTRY
 
@@ -53,9 +54,7 @@ ENTITY_CLASSES = [GeminiLiveSTT, GPTRealtimeSTT]
 @pytest.fixture(autouse=True)
 def _core_supports_interruption(monkeypatch: pytest.MonkeyPatch):
     """Pretend Core provides the complete TTS interruption path."""
-    monkeypatch.setattr(
-        "gemini_live.stt.supports_tts_interruption", lambda: True
-    )
+    monkeypatch.setattr("gemini_live.stt.supports_tts_interruption", lambda: True)
 
 
 def test_native_search_grounding_adds_search_instruction_without_assist_tool():
@@ -444,16 +443,21 @@ async def test_audio_tool_context_preserves_pipeline_provenance(
     hass = FakeHass()
     entity, _session_manager, _turn_store = _make_entity(
         hass,
-        {"api_key": "k"},
+        {
+            "api_key": "k",
+            CONF_LLM_HASS_API: ["assist", "memory"],
+        },
         entity_class,
     )
     session = ScriptedSession(support_barge_in=False)
     _bind_client(entity, ScriptedClient(session))
     source_context = Context(user_id="voice-user", parent_id="parent-context")
     captured_contexts = []
+    captured_api_ids = []
 
     async def fake_async_get_api(**kwargs):
         captured_contexts.append(kwargs["llm_context"].context)
+        captured_api_ids.append(kwargs["api_id"])
         return SimpleNamespace(tools=[], api_prompt="", custom_serializer=None)
 
     monkeypatch.setattr("gemini_live.stt.llm.async_get_api", fake_async_get_api)
@@ -486,6 +490,7 @@ async def test_audio_tool_context_preserves_pipeline_provenance(
     mic.close()
 
     assert captured_contexts == [source_context]
+    assert captured_api_ids == [["assist", "memory"]]
 
 
 async def test_audio_entry_point_forwards_resolved_pipeline_context(

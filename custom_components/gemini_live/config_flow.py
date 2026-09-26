@@ -4,8 +4,9 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.core import callback
-from homeassistant.helpers import selector
+from homeassistant.const import CONF_LLM_HASS_API
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import llm, selector
 
 from .compat import supports_tts_interruption
 from .const import (
@@ -57,7 +58,9 @@ PROVIDER_SELECTOR = selector.SelectSelector(
         options=[
             selector.SelectOptionDict(value=PROVIDER_GEMINI, label="Google Gemini"),
             selector.SelectOptionDict(value=PROVIDER_OPENAI, label="OpenAI"),
-            selector.SelectOptionDict(value=PROVIDER_PERSONAPLEX, label="fal.ai PersonaPlex"),
+            selector.SelectOptionDict(
+                value=PROVIDER_PERSONAPLEX, label="fal.ai PersonaPlex"
+            ),
         ],
         mode=selector.SelectSelectorMode.DROPDOWN,
     )
@@ -72,6 +75,7 @@ def _model_selector(models: list[str]) -> selector.SelectSelector:
             mode=selector.SelectSelectorMode.DROPDOWN,
         )
     )
+
 
 GEMINI_VOICE_SELECTOR = selector.SelectSelector(
     selector.SelectSelectorConfig(
@@ -112,19 +116,43 @@ def _provider(config: dict[str, Any]) -> str:
     return config.get(CONF_PROVIDER, PROVIDER_GEMINI)
 
 
-def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol.Schema:
+def _provider_schema(
+    provider: str,
+    config: dict[str, Any] | None = None,
+    hass: HomeAssistant | None = None,
+) -> vol.Schema:
     """Build a provider-specific setup/options schema."""
     current = config or {}
     is_openai = provider == PROVIDER_OPENAI
     is_personaplex = provider == PROVIDER_PERSONAPLEX
-    models = (PERSONAPLEX_AVAILABLE_MODELS if is_personaplex else
-              OPENAI_AVAILABLE_MODELS if is_openai else AVAILABLE_MODELS)
-    default_model = (PERSONAPLEX_DEFAULT_MODEL if is_personaplex else
-                     OPENAI_DEFAULT_MODEL if is_openai else DEFAULT_MODEL)
-    default_voice = (PERSONAPLEX_DEFAULT_VOICE if is_personaplex else
-                     OPENAI_DEFAULT_VOICE if is_openai else DEFAULT_VOICE)
-    voice_selector = (PERSONAPLEX_VOICE_SELECTOR if is_personaplex else
-                      OPENAI_VOICE_SELECTOR if is_openai else GEMINI_VOICE_SELECTOR)
+    models = (
+        PERSONAPLEX_AVAILABLE_MODELS
+        if is_personaplex
+        else OPENAI_AVAILABLE_MODELS
+        if is_openai
+        else AVAILABLE_MODELS
+    )
+    default_model = (
+        PERSONAPLEX_DEFAULT_MODEL
+        if is_personaplex
+        else OPENAI_DEFAULT_MODEL
+        if is_openai
+        else DEFAULT_MODEL
+    )
+    default_voice = (
+        PERSONAPLEX_DEFAULT_VOICE
+        if is_personaplex
+        else OPENAI_DEFAULT_VOICE
+        if is_openai
+        else DEFAULT_VOICE
+    )
+    voice_selector = (
+        PERSONAPLEX_VOICE_SELECTOR
+        if is_personaplex
+        else OPENAI_VOICE_SELECTOR
+        if is_openai
+        else GEMINI_VOICE_SELECTOR
+    )
     transcribe_key = CONF_TRANSCRIBE_GPT if is_openai else CONF_TRANSCRIBE_GEMINI
     default_transcribe = (
         DEFAULT_TRANSCRIBE_GPT if is_openai else DEFAULT_TRANSCRIBE_GEMINI
@@ -147,9 +175,7 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
         ): voice_selector,
         vol.Optional(
             CONF_SYSTEM_INSTRUCTION,
-            description={
-                "suggested_value": current.get(CONF_SYSTEM_INSTRUCTION, "")
-            },
+            description={"suggested_value": current.get(CONF_SYSTEM_INSTRUCTION, "")},
         ): str,
         vol.Optional(
             CONF_DETAILED_LOGGING,
@@ -164,36 +190,61 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
             default=current.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT),
         ): selector.BooleanSelector(),
     }
+    if hass is not None and not is_personaplex:
+        apis = [
+            selector.SelectOptionDict(value=api.id, label=api.name)
+            for api in llm.async_get_apis(hass)
+        ]
+        known_api_ids = {api["value"] for api in apis}
+        selected_apis = current.get(CONF_LLM_HASS_API, [llm.LLM_API_ASSIST])
+        if isinstance(selected_apis, str):
+            selected_apis = [selected_apis]
+        selected_apis = [api_id for api_id in selected_apis if api_id in known_api_ids]
+        fields[
+            vol.Optional(
+                CONF_LLM_HASS_API,
+                default=selected_apis,
+                description={"suggested_value": selected_apis},
+            )
+        ] = selector.SelectSelector(
+            selector.SelectSelectorConfig(options=apis, multiple=True)
+        )
     if not is_openai and not is_personaplex:
         # All Gemini Live models offered by this integration support Google's
         # server-side Search grounding tool. It is a separate, opt-in
         # preference from the former Assist search-tool prompt hint.
-        fields[vol.Optional(
-            CONF_SEARCH_GROUNDING,
-            default=current.get(
+        fields[
+            vol.Optional(
                 CONF_SEARCH_GROUNDING,
-                DEFAULT_SEARCH_GROUNDING,
-            ),
-        )] = selector.BooleanSelector()
+                default=current.get(
+                    CONF_SEARCH_GROUNDING,
+                    DEFAULT_SEARCH_GROUNDING,
+                ),
+            )
+        ] = selector.BooleanSelector()
     elif is_openai:
-        fields[vol.Optional(
-            CONF_ENCOURAGE_WEB_SEARCH,
-            default=current.get(
+        fields[
+            vol.Optional(
                 CONF_ENCOURAGE_WEB_SEARCH,
-                DEFAULT_ENCOURAGE_WEB_SEARCH,
-            ),
-        )] = selector.BooleanSelector()
+                default=current.get(
+                    CONF_ENCOURAGE_WEB_SEARCH,
+                    DEFAULT_ENCOURAGE_WEB_SEARCH,
+                ),
+            )
+        ] = selector.BooleanSelector()
     if not is_personaplex and supports_tts_interruption():
         # Barge-in needs Core's complete TTS interruption path. When the
         # installed Core cannot propagate interruptions, the setting cannot do
         # anything, so it is hidden entirely and never blocks setup.
-        fields[vol.Optional(
-            CONF_SUPPORT_BARGE_IN,
-            default=current.get(
+        fields[
+            vol.Optional(
                 CONF_SUPPORT_BARGE_IN,
-                DEFAULT_SUPPORT_BARGE_IN,
-            ),
-        )] = selector.BooleanSelector()
+                default=current.get(
+                    CONF_SUPPORT_BARGE_IN,
+                    DEFAULT_SUPPORT_BARGE_IN,
+                ),
+            )
+        ] = selector.BooleanSelector()
     # The affective-dialog switch is Gemini-specific and only rendered for
     # models that support it; Home Assistant config forms cannot render a
     # disabled field, so it is hidden instead.
@@ -202,25 +253,29 @@ def _provider_schema(provider: str, config: dict[str, Any] | None = None) -> vol
         and not is_personaplex
         and supports_affective_dialog(current.get(CONF_MODEL))
     ):
-        fields[vol.Optional(
-            CONF_AFFECTIVE_DIALOG,
-            default=current.get(
+        fields[
+            vol.Optional(
                 CONF_AFFECTIVE_DIALOG,
-                DEFAULT_AFFECTIVE_DIALOG,
-            ),
-        )] = selector.BooleanSelector()
+                default=current.get(
+                    CONF_AFFECTIVE_DIALOG,
+                    DEFAULT_AFFECTIVE_DIALOG,
+                ),
+            )
+        ] = selector.BooleanSelector()
     if (
         not is_openai
         and not is_personaplex
         and supports_thinking_level(current.get(CONF_MODEL))
     ):
-        fields[vol.Optional(
-            CONF_THINKING_LEVEL,
-            default=current.get(
+        fields[
+            vol.Optional(
                 CONF_THINKING_LEVEL,
-                DEFAULT_THINKING_LEVEL,
-            ),
-        )] = _model_selector(THINKING_LEVELS)
+                default=current.get(
+                    CONF_THINKING_LEVEL,
+                    DEFAULT_THINKING_LEVEL,
+                ),
+            )
+        ] = _model_selector(THINKING_LEVELS)
     if is_personaplex:
         # PersonaPlex currently has no function-calling, display-text tool, or
         # explicit VAD event surface in its public realtime API.
@@ -244,12 +299,8 @@ def _needs_model_specific_refresh(user_input: dict[str, Any]) -> bool:
     """Return whether a newly selected model needs its settings form shown."""
     model = user_input.get(CONF_MODEL)
     return (
-        supports_thinking_level(model)
-        and CONF_THINKING_LEVEL not in user_input
-    ) or (
-        supports_affective_dialog(model)
-        and CONF_AFFECTIVE_DIALOG not in user_input
-    )
+        supports_thinking_level(model) and CONF_THINKING_LEVEL not in user_input
+    ) or (supports_affective_dialog(model) and CONF_AFFECTIVE_DIALOG not in user_input)
 
 
 class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -260,9 +311,7 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None):
         """Select the live model provider."""
         if user_input is not None:
-            return await self.async_step_provider(
-                provider=user_input[CONF_PROVIDER]
-            )
+            return await self.async_step_provider(provider=user_input[CONF_PROVIDER])
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
@@ -288,7 +337,9 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if _needs_model_specific_refresh(user_input):
                 return self.async_show_form(
                     step_id="provider",
-                    data_schema=_provider_schema(selected_provider, user_input),
+                    data_schema=_provider_schema(
+                        selected_provider, user_input, self.hass
+                    ),
                     description_placeholders={
                         "provider": "Google Gemini",
                     },
@@ -303,7 +354,7 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(title=title, data=user_input)
         return self.async_show_form(
             step_id="provider",
-            data_schema=_provider_schema(selected_provider),
+            data_schema=_provider_schema(selected_provider, hass=self.hass),
             description_placeholders={
                 "provider": {
                     PROVIDER_OPENAI: "OpenAI",
@@ -321,7 +372,7 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if _needs_model_specific_refresh(user_input):
                 return self.async_show_form(
                     step_id="reconfigure",
-                    data_schema=_provider_schema(provider, user_input),
+                    data_schema=_provider_schema(provider, user_input, self.hass),
                 )
             user_input = _strip_unsupported_settings(user_input)
             user_input[CONF_PROVIDER] = provider
@@ -333,7 +384,7 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=_provider_schema(provider, config),
+            data_schema=_provider_schema(provider, config, self.hass),
         )
 
     @staticmethod
@@ -356,7 +407,7 @@ class GeminiLiveOptionsFlowHandler(config_entries.OptionsFlow):
             if _needs_model_specific_refresh(user_input):
                 return self.async_show_form(
                     step_id="init",
-                    data_schema=_provider_schema(provider, user_input),
+                    data_schema=_provider_schema(provider, user_input, self.hass),
                 )
             user_input = _strip_unsupported_settings(user_input)
             user_input[CONF_PROVIDER] = provider
@@ -364,5 +415,5 @@ class GeminiLiveOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
         return self.async_show_form(
             step_id="init",
-            data_schema=_provider_schema(provider, config),
+            data_schema=_provider_schema(provider, config, self.hass),
         )

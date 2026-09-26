@@ -187,7 +187,8 @@ upgrade to the latest version.
 | API key | API key for the selected provider, used for every live connection. |
 | Live model | Provider-specific Realtime model used for voice and typed conversations. |
 | Voice | Provider-specific built-in voice used for native audio responses. |
-| System instruction | Optional personality and behavior instruction. Home Assistant's Assist API prompt is appended automatically. |
+| System instruction | Optional personality and behavior instruction. Instructions from the selected Home Assistant LLM APIs are appended automatically. |
+| LLM APIs | Home Assistant APIs whose tools the model may call. Keep **Assist** selected for smart-home control; integrations such as AI Memory add their own choices, such as **Memory Management**. Multiple APIs can be enabled together. |
 | Detailed logging | Enables verbose logs from this custom integration. These logs can contain transcripts, model details, and tool-call information. |
 | Transcribe Gemini / GPT | Streams the model's spoken-response transcript into Home Assistant while native audio is still arriving. Disabled by default for the lowest playback latency. |
 | Google Search grounding | Gemini only. Gives the Live model access to Google's built-in Search tool for current or verifiable web information. Optional and disabled by default. Search use may add Gemini API charges. |
@@ -245,8 +246,9 @@ directly.
 
 ## Give The Model Access To Home Assistant
 
-The selected model can only control or inspect what Home Assistant exposes through Assist.
-Keep the exposed set as small as practical.
+Keep **Assist** selected under **LLM APIs** to let the model control or inspect
+what Home Assistant exposes through Assist. Keep the exposed set as small as
+practical.
 
 1. Open **Settings > Voice assistants**.
 2. Open the **Expose** tab.
@@ -261,9 +263,11 @@ Examples:
 - "Run the good night script."
 - "Set the office thermostat to 20 degrees."
 
-Tool execution is performed by Home Assistant through its Assist LLM API. The
-integration sends tool definitions and tool results to Gemini so it can decide
-what to call and describe the outcome.
+Tool execution is performed by Home Assistant through the selected LLM APIs.
+The integration sends their tool definitions and results to the live provider
+so it can decide what to call and describe the outcome. Third-party integrations
+that register an LLM API, including AI Memory, appear in the same selector and
+can be enabled alongside Assist.
 
 ## Enable Google Search
 
