@@ -4,6 +4,10 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Fixed Gemini responses being interrupted when barge-in was disabled on
+  satellites that continue sending microphone audio as the model starts its
+  response, notably the ESP32 S3 Box 3. The Gemini session now explicitly uses
+  `NO_INTERRUPTION` unless barge-in is enabled. Fixes #11.
 - Removed the `Show text` setting and integration-owned `show_text` tool. Screen
   display behavior belongs in the remote satellite or client rather than the
   live-model tool API.

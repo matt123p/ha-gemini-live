@@ -86,10 +86,11 @@ async def _collect(session: GeminiLiveSession) -> list[LiveEvent]:
     return [event async for event in session.receive()]
 
 
-def test_gemini_config_legacy_keeps_existing_realtime_input_config():
+def test_gemini_config_without_barge_in_disables_activity_interruption():
     config = _gemini_config(_make_config())
 
     assert config["realtime_input_config"] == {
+        "activity_handling": "NO_INTERRUPTION",
         "turn_coverage": "TURN_INCLUDES_ONLY_ACTIVITY"
     }
 

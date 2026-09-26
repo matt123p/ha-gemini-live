@@ -232,6 +232,11 @@ def _gemini_config(config: LiveConfig) -> dict[str, Any]:
         "system_instruction": {"parts": [{"text": config.system_instruction}]},
         "input_audio_transcription": {},
         "realtime_input_config": {
+            # Gemini defaults to interrupting an in-progress response when new
+            # activity is detected. Disable that behaviour explicitly unless
+            # the user has opted into barge-in; some satellites keep sending
+            # microphone audio while the model starts its response.
+            "activity_handling": "NO_INTERRUPTION",
             "turn_coverage": "TURN_INCLUDES_ONLY_ACTIVITY"
         },
     }
