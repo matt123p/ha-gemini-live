@@ -13,7 +13,6 @@ CONF_TRANSCRIBE_GPT = "transcribe_gpt"
 CONF_ENCOURAGE_WEB_SEARCH = "encourage_web_search"
 CONF_SEARCH_GROUNDING = "search_grounding"
 CONF_THINKING_LEVEL = "thinking_level"
-CONF_SHOW_TEXT = "show_text"
 CONF_SUPPORT_BARGE_IN = "support_barge_in"
 CONF_AFFECTIVE_DIALOG = "affective_dialog"
 
@@ -24,7 +23,6 @@ DEFAULT_TRANSCRIBE_GPT = False
 DEFAULT_ENCOURAGE_WEB_SEARCH = False
 DEFAULT_SEARCH_GROUNDING = False
 DEFAULT_THINKING_LEVEL = "low"
-DEFAULT_SHOW_TEXT = True
 DEFAULT_SUPPORT_BARGE_IN = False
 DEFAULT_AFFECTIVE_DIALOG = False
 PROVIDER_GEMINI = "gemini"
@@ -62,6 +60,7 @@ def supports_thinking_level(model: str | None) -> bool:
     """Return whether a model exposes configurable background reasoning."""
     return model == EXTENDED_THINKING_MODEL
 
+
 # Model generations that expose the affective-dialog setting. Affective
 # dialog lets the model read the tone and emotion in the user's voice and
 # adapt its own speaking style to match. The Gemini 3.8 Live generation
@@ -79,6 +78,7 @@ def supports_affective_dialog(model: str | None) -> bool:
     if not model:
         return False
     return model in AFFECTIVE_DIALOG_MODELS
+
 
 OPENAI_DEFAULT_MODEL = "gpt-realtime-2.1"
 OPENAI_DEFAULT_VOICE = "marin"
@@ -105,10 +105,10 @@ PERSONAPLEX_DEFAULT_MODEL = "fal-ai/personaplex/realtime"
 PERSONAPLEX_AVAILABLE_MODELS = [PERSONAPLEX_DEFAULT_MODEL]
 PERSONAPLEX_DEFAULT_VOICE = "NATF2"
 PERSONAPLEX_AVAILABLE_VOICES_INFO: list[tuple[str, str]] = [
-    *( (f"NATF{i}", "Natural female") for i in range(4) ),
-    *( (f"NATM{i}", "Natural male") for i in range(4) ),
-    *( (f"VARF{i}", "Variety female") for i in range(5) ),
-    *( (f"VARM{i}", "Variety male") for i in range(5) ),
+    *((f"NATF{i}", "Natural female") for i in range(4)),
+    *((f"NATM{i}", "Natural male") for i in range(4)),
+    *((f"VARF{i}", "Variety female") for i in range(5)),
+    *((f"VARM{i}", "Variety male") for i in range(5)),
 ]
 
 # Languages supported by Gemini native audio models.
@@ -201,41 +201,43 @@ SUPPORTED_LANGUAGES = [
 # Format: (voice_name, gender, description)
 AVAILABLE_VOICES_INFO: list[tuple[str, str, str]] = [
     # --- Female voices ---
-    ("Zephyr",          "female", "Bright and clear"),
-    ("Kore",            "female", "Strong and firm"),
-    ("Leda",            "female", "Youthful and energetic"),
-    ("Aoede",           "female", "Relaxed and natural"),
-    ("Callirhoe",       "female", "Friendly and easy-going"),
-    ("Autonoe",         "female", "Bright and cheerful"),
-    ("Despina",         "female", "Smooth and gentle"),
-    ("Erinome",         "female", "Clear and articulate"),
-    ("Laomedeia",       "female", "Positive and upbeat"),
-    ("Achernar",        "female", "Soft and warm"),
-    ("Gacrux",          "female", "Mature and steady"),
-    ("Vindemiatrix",    "female", "Gentle and delicate"),
-    ("Sulafat",         "female", "Warm and approachable"),
+    ("Zephyr", "female", "Bright and clear"),
+    ("Kore", "female", "Strong and firm"),
+    ("Leda", "female", "Youthful and energetic"),
+    ("Aoede", "female", "Relaxed and natural"),
+    ("Callirhoe", "female", "Friendly and easy-going"),
+    ("Autonoe", "female", "Bright and cheerful"),
+    ("Despina", "female", "Smooth and gentle"),
+    ("Erinome", "female", "Clear and articulate"),
+    ("Laomedeia", "female", "Positive and upbeat"),
+    ("Achernar", "female", "Soft and warm"),
+    ("Gacrux", "female", "Mature and steady"),
+    ("Vindemiatrix", "female", "Gentle and delicate"),
+    ("Sulafat", "female", "Warm and approachable"),
     # --- Male voices ---
-    ("Puck",            "male",   "Upbeat and lively"),
-    ("Charon",          "male",   "Calm and professional"),
-    ("Fenrir",          "male",   "Passionate and energetic"),
-    ("Orus",            "male",   "Calm and firm"),
-    ("Enceladus",       "male",   "Soft and breathy"),
-    ("Iapetus",         "male",   "Clear and clean"),
-    ("Umbriel",         "male",   "Relaxed and easy-going"),
-    ("Algieba",         "male",   "Smooth and flowing"),
-    ("Algenib",         "male",   "Gravelly and textured"),
-    ("Rasalgethi",      "male",   "Professional narrator"),
-    ("Alnilam",         "male",   "Confident and firm"),
-    ("Schedar",         "male",   "Even and steady"),
-    ("Pulcherrima",     "male",   "Forward and enterprising"),
-    ("Achird",          "male",   "Friendly and kind"),
-    ("Zubenelgenubi",   "male",   "Casual and relaxed"),
-    ("Sadachbia",       "male",   "Lively and vivid"),
-    ("Sadaltager",      "male",   "Knowledgeable and learned"),
+    ("Puck", "male", "Upbeat and lively"),
+    ("Charon", "male", "Calm and professional"),
+    ("Fenrir", "male", "Passionate and energetic"),
+    ("Orus", "male", "Calm and firm"),
+    ("Enceladus", "male", "Soft and breathy"),
+    ("Iapetus", "male", "Clear and clean"),
+    ("Umbriel", "male", "Relaxed and easy-going"),
+    ("Algieba", "male", "Smooth and flowing"),
+    ("Algenib", "male", "Gravelly and textured"),
+    ("Rasalgethi", "male", "Professional narrator"),
+    ("Alnilam", "male", "Confident and firm"),
+    ("Schedar", "male", "Even and steady"),
+    ("Pulcherrima", "male", "Forward and enterprising"),
+    ("Achird", "male", "Friendly and kind"),
+    ("Zubenelgenubi", "male", "Casual and relaxed"),
+    ("Sadachbia", "male", "Lively and vivid"),
+    ("Sadaltager", "male", "Knowledgeable and learned"),
 ]
 
 # Flat list of voice names for selectors (deduplicated, preserving order)
-AVAILABLE_VOICES: list[str] = list(dict.fromkeys(name for name, _, _ in AVAILABLE_VOICES_INFO))
+AVAILABLE_VOICES: list[str] = list(
+    dict.fromkeys(name for name, _, _ in AVAILABLE_VOICES_INFO)
+)
 
 # Runtime objects stored under hass.data[DOMAIN][config_entry_id].
 GEMINI_SESSION_MANAGER_KEY = "session_manager"

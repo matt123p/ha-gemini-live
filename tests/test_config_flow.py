@@ -170,6 +170,13 @@ def test_llm_api_selector_hidden_for_provider_without_tools(monkeypatch) -> None
     assert CONF_LLM_HASS_API not in keys
 
 
+def test_show_text_setting_is_removed() -> None:
+    """Do not expose the former integration-owned display callback setting."""
+    for provider in (PROVIDER_GEMINI, PROVIDER_OPENAI, PROVIDER_PERSONAPLEX):
+        keys = [marker.schema for marker in _provider_schema(provider).schema]
+        assert "show_text" not in keys
+
+
 def test_thinking_level_only_shown_for_extended_thinking() -> None:
     for model, expected in (
         ("gemini-3.8-live-extended-thinking", True),

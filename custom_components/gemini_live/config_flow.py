@@ -19,7 +19,6 @@ from .const import (
     CONF_MODEL,
     CONF_PROVIDER,
     CONF_SEARCH_GROUNDING,
-    CONF_SHOW_TEXT,
     CONF_SUPPORT_BARGE_IN,
     CONF_SYSTEM_INSTRUCTION,
     CONF_THINKING_LEVEL,
@@ -30,7 +29,6 @@ from .const import (
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_MODEL,
     DEFAULT_SEARCH_GROUNDING,
-    DEFAULT_SHOW_TEXT,
     DEFAULT_SUPPORT_BARGE_IN,
     DEFAULT_THINKING_LEVEL,
     DEFAULT_TRANSCRIBE_GEMINI,
@@ -185,10 +183,6 @@ def _provider_schema(
             transcribe_key,
             default=current.get(transcribe_key, default_transcribe),
         ): selector.BooleanSelector(),
-        vol.Optional(
-            CONF_SHOW_TEXT,
-            default=current.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT),
-        ): selector.BooleanSelector(),
     }
     if hass is not None and not is_personaplex:
         apis = [
@@ -276,11 +270,6 @@ def _provider_schema(
                 ),
             )
         ] = _model_selector(THINKING_LEVELS)
-    if is_personaplex:
-        # PersonaPlex currently has no function-calling, display-text tool, or
-        # explicit VAD event surface in its public realtime API.
-        marker = next(marker for marker in fields if marker.schema == CONF_SHOW_TEXT)
-        del fields[marker]
     return vol.Schema(fields)
 
 

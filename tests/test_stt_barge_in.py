@@ -323,7 +323,6 @@ async def test_barge_in_keeps_microphone_forwarding_after_reply(
             "",
             True,
             False,
-            False,
             True,
             result_future,
             "conversation-1",
@@ -401,7 +400,6 @@ async def test_legacy_mode_stops_microphone_forwarding_after_reply(
             False,
             False,
             False,
-            False,
             result_future,
             "conversation-1",
             None,
@@ -475,7 +473,6 @@ async def test_audio_tool_context_preserves_pipeline_provenance(
             False,
             False,
             False,
-            False,
             result_future,
             "conversation-1",
             "device-1",
@@ -517,7 +514,7 @@ async def test_audio_entry_point_forwards_resolved_pipeline_context(
     async def fake_run(*args):
         captured_contexts.append(args[-1])
         result = SpeechResult("user request", SpeechResultState.SUCCESS)
-        args[10].set_result(result)
+        args[9].set_result(result)
         return result
 
     monkeypatch.setattr(entity, "_async_run_audio_stream_sdk", fake_run)
@@ -529,7 +526,6 @@ async def test_audio_entry_point_forwards_resolved_pipeline_context(
         "m",
         "v",
         "",
-        False,
         False,
         False,
         False,
@@ -628,7 +624,6 @@ async def test_placeholder_transcript_carries_unique_turn_id(
             "v",
             "",
             True,
-            False,
             False,
             True,
             result_future,

@@ -46,7 +46,6 @@ from .const import (
     CONF_PROVIDER,
     CONF_SEARCH_GROUNDING,
     CONF_SYSTEM_INSTRUCTION,
-    CONF_SHOW_TEXT,
     CONF_SUPPORT_BARGE_IN,
     CONF_THINKING_LEVEL,
     CONF_TRANSCRIBE_GEMINI,
@@ -59,7 +58,6 @@ from .const import (
     DEFAULT_TRANSCRIBE_GPT,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_SYSTEM_INSTRUCTION,
-    DEFAULT_SHOW_TEXT,
     DEFAULT_SEARCH_GROUNDING,
     DOMAIN,
     GEMINI_LIVE_TTS_PLACEHOLDER,
@@ -153,42 +151,6 @@ _END_CONVERSATION_TOOL = LiveTool(
         "type": "object",
         "properties": {},
         "additionalProperties": False,
-    },
-)
-
-SHOW_TEXT_TOOL_NAME = "show_text"
-
-_SHOW_TEXT_INSTRUCTION = (
-    "The user WILL NOT see the transcription of what you say. "
-    f"You MUST call {SHOW_TEXT_TOOL_NAME} whenever your response contains a lot of "
-    "information or would be easier to scan, follow, copy, or refer back to in writing. "
-    "This includes multi-step instructions, detailed or long lists, comparisons, schedules, "
-    "names, dates, links, code, and other precise details. Err on the side of showing text "
-    "for detailed or information-dense answers. When using it, call it as your FIRST action, "
-    "before speaking any part of the answer. Put the complete useful written content in "
-    f"the {SHOW_TEXT_TOOL_NAME} call, then give a concise spoken summary. "
-    "Do not call it for a simple, brief answer. This function is the only way the user "
-    "will see any text from you."
-)
-
-_SHOW_TEXT_TOOL = LiveTool(
-    name=SHOW_TEXT_TOOL_NAME,
-    description=(
-        "Display text or markdown to the user before speaking. Use this proactively as your "
-        "first action whenever a response "
-        "contains substantial information or details that are easier to scan, follow, "
-        "copy, or revisit in writing, including instructions, lists, comparisons, "
-        "schedules, names, dates, links, and code."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "text": {
-                "type": "string",
-                "description": "The text or markdown formatted text to display to the user.",
-            }
-        },
-        "required": ["text"],
     },
 )
 
@@ -304,18 +266,6 @@ def _add_end_conversation_tool(
 def _add_end_conversation_instruction(system_instruction: str) -> str:
     """Tell Gemini when to finish the Home Assistant conversation."""
     return f"{system_instruction}\n\n{_END_CONVERSATION_INSTRUCTION}"
-
-
-def _add_show_text_tool(
-    tools: list[LiveTool],
-) -> list[LiveTool]:
-    """Add the integration-owned show text callback."""
-    return [*tools, _SHOW_TEXT_TOOL]
-
-
-def _add_show_text_instruction(system_instruction: str) -> str:
-    """Tell the live model to use the show_text callback to show text to the user."""
-    return f"{system_instruction}\n\n{_SHOW_TEXT_INSTRUCTION}"
 
 
 def _add_search_tool_instruction(
@@ -477,7 +427,6 @@ class LiveModelSTT(SpeechToTextEntity):
         custom_instruction: str,
         transcribe_output: bool,
         encourage_web_search: bool,
-        show_text: bool,
         support_barge_in: bool,
         result_future: asyncio.Future[SpeechResult],
         conversation_id: str,
@@ -486,7 +435,6 @@ class LiveModelSTT(SpeechToTextEntity):
     ) -> SpeechResult:
         """Process audio using the configured live-model client."""
         turn_id = uuid4().hex[:8]
-        show_text_content: str | None = None
         started_at = time.monotonic()
         entry_data = self.hass.data[self.integration_domain][self.entry.entry_id]
         session_manager = entry_data[self.session_manager_key]
@@ -578,8 +526,6 @@ class LiveModelSTT(SpeechToTextEntity):
                 native_search_grounding=True,
             )
         system_instruction = _add_end_conversation_instruction(system_instruction)
-        if not transcribe_output and show_text:
-            system_instruction = _add_show_text_instruction(system_instruction)
 
         live_tools = _add_end_conversation_tool(
             _format_tools_for_live(
@@ -590,8 +536,6 @@ class LiveModelSTT(SpeechToTextEntity):
             if llm_api
             else []
         )
-        if not transcribe_output and show_text:
-            live_tools = _add_show_text_tool(live_tools)
         _LOGGER.debug(
             "Exposing %d tools to the live model: %s",
             len(live_tools),
@@ -805,7 +749,7 @@ class LiveModelSTT(SpeechToTextEntity):
 
             async def receive_responses() -> None:
                 nonlocal audio_response_bytes, audio_response_chunk_count
-                nonlocal last_response_activity, show_text_content
+                nonlocal last_response_activity
                 replacement_response_pending = False
                 try:
                     _LOGGER.warning("[turn=%s] receive_responses started", turn_id)
@@ -885,12 +829,6 @@ class LiveModelSTT(SpeechToTextEntity):
                                     tool_result = {
                                         "success": True,
                                         "conversation_ended": True,
-                                    }
-                                elif tool_name == SHOW_TEXT_TOOL_NAME:
-                                    show_text_content = tool_args.get("text")
-                                    tool_result = {
-                                        "success": True,
-                                        "displayed": True,
                                     }
                                 elif llm_api is not None:
                                     try:
@@ -1086,14 +1024,7 @@ class LiveModelSTT(SpeechToTextEntity):
                 )
                 # HA persistently caches TTS audio by message. A per-turn message
                 # prevents it from replaying an earlier live-model audio stream.
-                if (
-                    not transcribe_output
-                    and show_text
-                    and show_text_content is not None
-                ):
-                    tts_message = show_text_content
-                else:
-                    tts_message = f"{self.tts_placeholder} {turn_id}"
+                tts_message = f"{self.tts_placeholder} {turn_id}"
                 turn_store.add_voice_turn(
                     PipelineTurn(
                         conversation_id=conversation_id,
@@ -1277,10 +1208,7 @@ class LiveModelSTT(SpeechToTextEntity):
             )
             return SpeechResult(None, SpeechResultState.ERROR)
 
-        if not transcribe_output and show_text and show_text_content is not None:
-            assistant_text = show_text_content
-        else:
-            assistant_text = response_text
+        assistant_text = response_text
 
         conversation_complete = not session_manager.should_continue_conversation(
             conversation_id
@@ -1315,7 +1243,6 @@ class LiveModelSTT(SpeechToTextEntity):
         custom_instruction: str,
         transcribe_output: bool,
         encourage_web_search: bool,
-        show_text: bool,
         support_barge_in: bool,
     ) -> SpeechResult:
         """Run the Live turn in the background so TTS can consume it immediately."""
@@ -1334,7 +1261,6 @@ class LiveModelSTT(SpeechToTextEntity):
                 custom_instruction,
                 transcribe_output,
                 encourage_web_search,
-                show_text,
                 support_barge_in,
                 result_future,
                 conversation_id,
@@ -1486,7 +1412,6 @@ class LiveModelSTT(SpeechToTextEntity):
                     DEFAULT_ENCOURAGE_WEB_SEARCH,
                 )
             )
-        show_text = bool(config.get(CONF_SHOW_TEXT, DEFAULT_SHOW_TEXT))
         self._set_detailed_logging(bool(config.get(CONF_DETAILED_LOGGING, False)))
 
         _LOGGER.warning(
@@ -1512,7 +1437,6 @@ class LiveModelSTT(SpeechToTextEntity):
             custom_instruction,
             user_requested_transcription,
             encourage_web_search,
-            show_text,
             support_barge_in,
         )
 

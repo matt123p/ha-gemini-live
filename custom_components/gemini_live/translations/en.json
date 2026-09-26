@@ -23,7 +23,6 @@
           "encourage_web_search": "Encourage web search",
           "search_grounding": "Google Search grounding",
           "thinking_level": "Thinking level",
-          "show_text": "Show text",
           "support_barge_in": "Support barge-in",
           "affective_dialog": "Affective dialog",
           "llm_hass_api": "LLM APIs"
@@ -39,7 +38,6 @@
           "encourage_web_search": "Tell the model to use an exposed search-like Assist tool for current or explicitly requested online information.",
           "search_grounding": "Allow Gemini to use Google's built-in Search tool for current and verifiable web information. Search queries may incur additional Gemini API charges.",
           "thinking_level": "Controls how much background reasoning Gemini 3.8 Live Extended Thinking uses. Higher levels can improve complex answers but may increase latency and cost.",
-          "show_text": "Expose show_text so the model can display formatted text when response transcription is off.",
           "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage.",
           "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 2.5 Flash Native Audio Preview (12-2025).",
           "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use. Select Assist for smart-home control and Memory Management for long-term memory."
@@ -59,7 +57,6 @@
           "encourage_web_search": "Encourage web search",
           "search_grounding": "Google Search grounding",
           "thinking_level": "Thinking level",
-          "show_text": "Show text",
           "support_barge_in": "Support barge-in",
           "affective_dialog": "Affective dialog",
           "llm_hass_api": "LLM APIs"
@@ -94,7 +91,6 @@
           "encourage_web_search": "Encourage web search",
           "search_grounding": "Google Search grounding",
           "thinking_level": "Thinking level",
-          "show_text": "Show text",
           "support_barge_in": "Support barge-in",
           "affective_dialog": "Affective dialog",
           "llm_hass_api": "LLM APIs"

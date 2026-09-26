@@ -4,6 +4,9 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Removed the `Show text` setting and integration-owned `show_text` tool. Screen
+  display behavior belongs in the remote satellite or client rather than the
+  live-model tool API.
 - Added a multi-select for Home Assistant LLM APIs to setup, reconfigure, and
   options screens. Third-party APIs such as AI Memory's Memory Management can
   now be enabled alongside Assist, and their tools and prompt are passed to
