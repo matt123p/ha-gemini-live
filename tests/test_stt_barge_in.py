@@ -373,7 +373,7 @@ async def test_barge_in_keeps_microphone_forwarding_after_reply(
 
 
 @pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
-async def test_legacy_mode_stops_microphone_forwarding_after_reply(
+async def test_non_barge_in_keeps_forwarding_until_external_vad_closes_stream(
     entity_class,
 ) -> None:
     hass = FakeHass()
@@ -413,15 +413,17 @@ async def test_legacy_mode_stops_microphone_forwarding_after_reply(
     baseline = len(session.sent_audio)
     assert baseline > 0
 
-    # Legacy behaviour: chunks arriving after the reply must not be forwarded.
+    # Home Assistant must keep consuming the microphone generator until its
+    # external VAD closes it. Otherwise remote satellites never receive the
+    # STT_VAD_END event that tells them to stop streaming.
     for _ in range(EXTRA_MIC_CHUNKS):
         mic.put(MIC_CHUNK)
-    await asyncio.sleep(0.1)
-    assert len(session.sent_audio) == baseline
+    await _wait_until(lambda: len(session.sent_audio) >= baseline + EXTRA_MIC_CHUNKS)
 
+    mic.close()
+    await _wait_until(lambda: session.end_audio_count == 1)
     session.release_gate.set()
     result = await asyncio.wait_for(run_task, 15)
-    mic.close()
     assert result.result is SpeechResultState.SUCCESS
 
     turn = turn_store.take_voice_turn("conversation-1", result.text)
@@ -482,9 +484,9 @@ async def test_audio_tool_context_preserves_pipeline_provenance(
 
     mic.put(MIC_CHUNK)
     await asyncio.wait_for(session.reply_started.wait(), 5)
+    mic.close()
     session.release_gate.set()
     await asyncio.wait_for(run_task, 15)
-    mic.close()
 
     assert captured_contexts == [source_context]
     assert captured_api_ids == [["assist", "memory"]]

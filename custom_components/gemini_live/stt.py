@@ -669,13 +669,6 @@ class LiveModelSTT(SpeechToTextEntity):
                     async for chunk in stream:
                         if not chunk:
                             continue
-                        if not support_barge_in and gemini_replied.is_set():
-                            _LOGGER.warning(
-                                "[turn=%s] send_audio stopped because the model started replying",
-                                turn_id,
-                            )
-                            break
-
                         if first_chunk:
                             first_chunk = False
                             if chunk[:4] == b"RIFF":
@@ -706,9 +699,7 @@ class LiveModelSTT(SpeechToTextEntity):
                             await session.send_audio(dispatch_chunk)
                             audio_sent = True
 
-                    if len(audio_buffer) > 0 and (
-                        support_barge_in or not gemini_replied.is_set()
-                    ):
+                    if len(audio_buffer) > 0:
                         chunk_count += 1
                         dispatch_chunk = bytes(audio_buffer)
                         if diagnostics_enabled:
@@ -729,7 +720,7 @@ class LiveModelSTT(SpeechToTextEntity):
                             _analyse_pcm(b"".join(pcm_for_diag)),
                         )
 
-                    if audio_sent and (support_barge_in or not gemini_replied.is_set()):
+                    if audio_sent:
                         _LOGGER.debug("[turn=%s] signalling audio stream end", turn_id)
                         await session.end_audio()
                 except asyncio.CancelledError:
@@ -1046,20 +1037,6 @@ class LiveModelSTT(SpeechToTextEntity):
 
             publish_task = asyncio.create_task(publish_streaming_turn())
 
-            async def _cancel_sender_on_reply() -> None:
-                await gemini_replied.wait()
-                if not send_task.done():
-                    _LOGGER.warning(
-                        "[turn=%s] cancelling send task because the model started replying",
-                        turn_id,
-                    )
-                    send_task.cancel()
-
-            # With barge-in the microphone sender must live for the whole
-            # provider turn so the user can interrupt while the model speaks.
-            cancel_on_reply_task: asyncio.Task[None] | None = None
-            if not support_barge_in:
-                cancel_on_reply_task = asyncio.create_task(_cancel_sender_on_reply())
             try:
                 done: set[asyncio.Task[Any]] = set()
                 while not done:
@@ -1101,11 +1078,17 @@ class LiveModelSTT(SpeechToTextEntity):
 
                 if receive_task in done:
                     if not send_task.done():
-                        send_task.cancel()
-                        try:
+                        if support_barge_in:
+                            send_task.cancel()
+                            try:
+                                await send_task
+                            except asyncio.CancelledError:
+                                pass
+                        else:
+                            # Continue consuming until Core's external VAD
+                            # closes the generator and emits STT_VAD_END to the
+                            # remote satellite.
                             await send_task
-                        except asyncio.CancelledError:
-                            pass
                 elif not audio_sent:
                     receive_task.cancel()
                     try:
@@ -1156,11 +1139,7 @@ class LiveModelSTT(SpeechToTextEntity):
                 else:
                     publish_task.cancel()
             finally:
-                if cancel_on_reply_task is not None and not cancel_on_reply_task.done():
-                    cancel_on_reply_task.cancel()
                 tasks: list[asyncio.Task[Any]] = [send_task, receive_task]
-                if cancel_on_reply_task is not None:
-                    tasks.append(cancel_on_reply_task)
                 tasks.append(publish_task)
                 for task in tasks:
                     if not task.done():
@@ -1380,7 +1359,6 @@ class LiveModelSTT(SpeechToTextEntity):
     ) -> SpeechResult:
         """Send the audio stream directly to the configured live model."""
         turn_id = uuid4().hex[:8]
-        started_at = time.monotonic()
         config = {**self.entry.data, **self.entry.options}
         api_key = config.get(CONF_API_KEY)
         model = config.get(CONF_MODEL)
