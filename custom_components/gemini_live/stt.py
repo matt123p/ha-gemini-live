@@ -394,6 +394,16 @@ class LiveModelSTT(SpeechToTextEntity):
     def unique_id(self) -> str:
         return self._attr_unique_id
 
+    def _effective_support_barge_in(self) -> bool:
+        """Return whether barge-in is both configured and supported by Core."""
+        config = {**self.entry.data, **self.entry.options}
+        return bool(
+            config.get(
+                CONF_SUPPORT_BARGE_IN,
+                DEFAULT_SUPPORT_BARGE_IN,
+            )
+        ) and supports_tts_interruption()
+
     @property
     def audio_processing(self) -> SpeechAudioProcessing:
         """Let the live provider own turn detection while barge-in is enabled.
@@ -403,12 +413,7 @@ class LiveModelSTT(SpeechToTextEntity):
         barge-in enabled the provider's own VAD decides when the user stops
         and starts speaking, so the stream must stay open.
         """
-        config = {**self.entry.data, **self.entry.options}
-
-        if not config.get(
-            CONF_SUPPORT_BARGE_IN,
-            DEFAULT_SUPPORT_BARGE_IN,
-        ):
+        if not self._effective_support_barge_in():
             return DEFAULT_AUDIO_PROCESSING
 
         return SpeechAudioProcessing(
@@ -1001,6 +1006,14 @@ class LiveModelSTT(SpeechToTextEntity):
             async def publish_streaming_turn() -> None:
                 """Release the pipeline once the live model starts producing audio."""
                 await first_audio.wait()
+                if not support_barge_in:
+                    # Do not advance Home Assistant to conversation/TTS while
+                    # Core's external VAD is still consuming microphone audio.
+                    # Some satellites otherwise stop the stream without closing
+                    # its generator, leaving both this task and the device stuck
+                    # until the response inactivity timeout. The model's audio
+                    # can safely queue in AudioStream while external VAD finishes.
+                    await send_task
                 if not input_transcript_parts:
                     try:
                         await asyncio.wait_for(
@@ -1367,15 +1380,7 @@ class LiveModelSTT(SpeechToTextEntity):
         user_requested_transcription = bool(
             config.get(self.transcribe_config_key, self.default_transcribe)
         )
-        support_barge_in = (
-            bool(
-                config.get(
-                    CONF_SUPPORT_BARGE_IN,
-                    DEFAULT_SUPPORT_BARGE_IN,
-                )
-            )
-            and supports_tts_interruption()
-        )
+        support_barge_in = self._effective_support_barge_in()
         if self.supports_search_grounding:
             encourage_web_search = bool(
                 config.get(

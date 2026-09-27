@@ -10,7 +10,11 @@ All notable changes to Gemini Live for Home Assistant are documented here.
   `NO_INTERRUPTION` unless barge-in is enabled. Non-barge-in turns also keep
   consuming microphone input until Home Assistant's external VAD closes the
   stream, ensuring remote satellites receive `STT_VAD_END` and the provider
-  receives the matching audio-stream end signal. Fixes #11.
+  receives the matching audio-stream end signal. Playback is not released until
+  external VAD has closed that stream, preventing satellites from stalling when
+  Gemini starts answering before Core finishes its STT stage. VAD negotiation
+  and runtime behavior now use the same effective barge-in capability, including
+  on Core versions without TTS interruption support. Fixes #11.
 - Removed the `Show text` setting and integration-owned `show_text` tool. Screen
   display behavior belongs in the remote satellite or client rather than the
   live-model tool API.

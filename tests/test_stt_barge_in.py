@@ -297,6 +297,25 @@ async def test_audio_processing_negotiates_external_vad(
 
 
 @pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
+async def test_unsupported_barge_in_uses_external_vad(
+    entity_class,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gemini_live.stt.supports_tts_interruption", lambda: False)
+    entity, _session_manager, _turn_store = _make_entity(
+        FakeHass(),
+        {
+            "api_key": "k",
+            CONF_SUPPORT_BARGE_IN: True,
+        },
+        entity_class,
+    )
+
+    assert entity._effective_support_barge_in() is False
+    assert entity.audio_processing.requires_external_vad is True
+
+
+@pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
 async def test_barge_in_keeps_microphone_forwarding_after_reply(
     entity_class,
 ) -> None:
@@ -419,9 +438,11 @@ async def test_non_barge_in_keeps_forwarding_until_external_vad_closes_stream(
     for _ in range(EXTRA_MIC_CHUNKS):
         mic.put(MIC_CHUNK)
     await _wait_until(lambda: len(session.sent_audio) >= baseline + EXTRA_MIC_CHUNKS)
+    assert not result_future.done()
 
     mic.close()
     await _wait_until(lambda: session.end_audio_count == 1)
+    await asyncio.wait_for(result_future, 5)
     session.release_gate.set()
     result = await asyncio.wait_for(run_task, 15)
     assert result.result is SpeechResultState.SUCCESS
