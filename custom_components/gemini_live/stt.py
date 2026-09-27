@@ -1067,6 +1067,7 @@ class LiveModelSTT(SpeechToTextEntity):
                             await receive_task
                         except asyncio.CancelledError:
                             pass
+                        session_manager.retire_session(conversation_id)
                         break
                     done, _pending = await asyncio.wait(
                         [send_task, receive_task],
@@ -1108,6 +1109,7 @@ class LiveModelSTT(SpeechToTextEntity):
                         await receive_task
                     except asyncio.CancelledError:
                         pass
+                    session_manager.retire_session(conversation_id)
                     return SpeechResult(None, SpeechResultState.ERROR)
                 elif support_barge_in:
                     # The microphone stream ended: Home Assistant closed it at
@@ -1139,6 +1141,7 @@ class LiveModelSTT(SpeechToTextEntity):
                                 await receive_task
                             except asyncio.CancelledError:
                                 pass
+                            session_manager.retire_session(conversation_id)
                             break
                         try:
                             await asyncio.wait_for(
@@ -1151,6 +1154,11 @@ class LiveModelSTT(SpeechToTextEntity):
                     await publish_task
                 else:
                     publish_task.cancel()
+                    # A provider turn that ends without playable audio must not
+                    # be reused. It may still deliver a late response or tool
+                    # call, which would otherwise leak into the next pipeline
+                    # run for this conversation.
+                    session_manager.retire_session(conversation_id)
             finally:
                 tasks: list[asyncio.Task[Any]] = [send_task, receive_task]
                 tasks.append(publish_task)

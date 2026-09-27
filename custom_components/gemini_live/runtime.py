@@ -288,6 +288,7 @@ class LiveSessionManager:
         """Initialize the manager."""
         self._connections: dict[str, _LiveConnection] = {}
         self._completed_conversations: set[str] = set()
+        self._sessions_to_retire: set[str] = set()
         self._conversation_locks: WeakValueDictionary[str, asyncio.Lock] = (
             WeakValueDictionary()
         )
@@ -342,18 +343,27 @@ class LiveSessionManager:
             finally:
                 if self._active_turn_tasks.get(conversation_id) is current_task:
                     self._active_turn_tasks.pop(conversation_id, None)
-                if conversation_id in self._completed_conversations:
+                if (
+                    conversation_id in self._completed_conversations
+                    or conversation_id in self._sessions_to_retire
+                ):
                     await self._async_close(conversation_id, connection)
+                    self._sessions_to_retire.discard(conversation_id)
 
     async def async_close_all(self) -> None:
         """Close every open Live connection."""
         for conversation_id, connection in list(self._connections.items()):
             await self._async_close(conversation_id, connection)
         self._completed_conversations.clear()
+        self._sessions_to_retire.clear()
 
     def complete_conversation(self, conversation_id: str) -> None:
         """Mark a conversation complete and retire its session after the turn."""
         self._completed_conversations.add(conversation_id)
+
+    def retire_session(self, conversation_id: str) -> None:
+        """Retire a failed session without ending the HA conversation."""
+        self._sessions_to_retire.add(conversation_id)
 
     def reset_conversation(self, conversation_id: str) -> None:
         """Reset completed conversation status for a new user input."""
@@ -432,6 +442,7 @@ class LiveSessionManager:
             if connection is not None:
                 await self._async_close(conversation_id, connection)
             self._completed_conversations.discard(conversation_id)
+            self._sessions_to_retire.discard(conversation_id)
 
     def _lock_for(self, conversation_id: str) -> asyncio.Lock:
         """Return the serialization lock for a conversation."""

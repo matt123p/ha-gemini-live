@@ -302,3 +302,37 @@ def test_config_signature_changes_when_barge_in_toggles():
     signature = LiveSessionManager._config_signature
 
     assert signature(legacy) != signature(barge_in)
+
+
+async def test_retired_session_is_replaced_without_ending_conversation():
+    manager = LiveSessionManager()
+    created_sessions = []
+    closed_sessions = []
+
+    class Client:
+        def connect(self, _config):
+            session = SimpleNamespace(is_open=True)
+            created_sessions.append(session)
+
+            class Connection:
+                async def __aenter__(self):
+                    return session
+
+                async def __aexit__(self, *_exc):
+                    closed_sessions.append(session)
+
+            return Connection()
+
+    client = Client()
+    config = _make_config()
+
+    async with manager.acquire("conversation-1", client, config) as first:
+        manager.retire_session("conversation-1")
+
+    assert closed_sessions == [first]
+    assert manager.should_continue_conversation("conversation-1") is True
+
+    async with manager.acquire("conversation-1", client, config) as second:
+        assert second is not first
+
+    assert len(created_sessions) == 2

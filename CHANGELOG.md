@@ -14,7 +14,9 @@ All notable changes to Gemini Live for Home Assistant are documented here.
   external VAD has closed that stream, preventing satellites from stalling when
   Gemini starts answering before Core finishes its STT stage. VAD negotiation
   and runtime behavior now use the same effective barge-in capability, including
-  on Core versions without TTS interruption support. Fixes #11.
+  on Core versions without TTS interruption support. Timed-out or unusable live
+  sessions are discarded so delayed responses and tool calls cannot leak into a
+  later continued-conversation turn. Fixes #11.
 - Removed the `Show text` setting and integration-owned `show_text` tool. Screen
   display behavior belongs in the remote satellite or client rather than the
   live-model tool API.
