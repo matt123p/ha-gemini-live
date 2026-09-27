@@ -44,6 +44,7 @@ from .const import (
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
     CONF_PROVIDER,
+    CONF_RESPONSE_TIMEOUT,
     CONF_SEARCH_GROUNDING,
     CONF_SYSTEM_INSTRUCTION,
     CONF_SUPPORT_BARGE_IN,
@@ -52,6 +53,7 @@ from .const import (
     CONF_TRANSCRIBE_GPT,
     CONF_VOICE,
     DEFAULT_AFFECTIVE_DIALOG,
+    DEFAULT_RESPONSE_TIMEOUT,
     DEFAULT_SUPPORT_BARGE_IN,
     DEFAULT_THINKING_LEVEL,
     DEFAULT_TRANSCRIBE_GEMINI,
@@ -98,8 +100,6 @@ _SEARCH_TOOL_INSTRUCTION = (
     "explicitly asks you to search, look up, check online, or verify something. "
     "Do not guess current external facts when the search tool can verify them."
 )
-
-RESPONSE_INACTIVITY_TIMEOUT = 30.0
 
 _SPENDING_CAP_ERROR_MARKER = "exceeded its monthly spending cap"
 _SPENDING_CAP_ISSUE_PREFIX = "spending_cap_exceeded"
@@ -477,6 +477,9 @@ class LiveModelSTT(SpeechToTextEntity):
         ha_tools: list[llm.Tool] = []
         system_instruction = custom_instruction or self.default_system_instruction
         config = {**self.entry.data, **self.entry.options}
+        response_inactivity_timeout = float(
+            config.get(CONF_RESPONSE_TIMEOUT, DEFAULT_RESPONSE_TIMEOUT)
+        )
         api_ids = config.get(CONF_LLM_HASS_API, [llm.LLM_API_ASSIST])
 
         if api_ids:
@@ -1053,14 +1056,14 @@ class LiveModelSTT(SpeechToTextEntity):
             try:
                 done: set[asyncio.Task[Any]] = set()
                 while not done:
-                    remaining = RESPONSE_INACTIVITY_TIMEOUT - (
+                    remaining = response_inactivity_timeout - (
                         time.monotonic() - last_response_activity
                     )
                     if remaining <= 0:
                         _LOGGER.warning(
                             "[turn=%s] cancelling receive task after %.1fs without response activity",
                             turn_id,
-                            RESPONSE_INACTIVITY_TIMEOUT,
+                            response_inactivity_timeout,
                         )
                         receive_task.cancel()
                         try:
@@ -1127,14 +1130,14 @@ class LiveModelSTT(SpeechToTextEntity):
                         pass
                 else:
                     while not receive_task.done():
-                        remaining = RESPONSE_INACTIVITY_TIMEOUT - (
+                        remaining = response_inactivity_timeout - (
                             time.monotonic() - last_response_activity
                         )
                         if remaining <= 0:
                             _LOGGER.warning(
                                 "[turn=%s] cancelling receive task after %.1fs without response activity",
                                 turn_id,
-                                RESPONSE_INACTIVITY_TIMEOUT,
+                                response_inactivity_timeout,
                             )
                             receive_task.cancel()
                             try:

@@ -4,6 +4,8 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Added a configurable response inactivity timeout, from 15 to 120 seconds. The
+  existing 30-second behavior remains the default for existing entries.
 - Fixed Gemini responses being interrupted when barge-in was disabled on
   satellites that continue sending microphone audio as the model starts its
   response, notably the ESP32 S3 Box 3. The Gemini session now explicitly uses

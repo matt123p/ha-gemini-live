@@ -18,6 +18,7 @@ from .const import (
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_MODEL,
     CONF_PROVIDER,
+    CONF_RESPONSE_TIMEOUT,
     CONF_SEARCH_GROUNDING,
     CONF_SUPPORT_BARGE_IN,
     CONF_SYSTEM_INSTRUCTION,
@@ -28,6 +29,7 @@ from .const import (
     DEFAULT_AFFECTIVE_DIALOG,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_MODEL,
+    DEFAULT_RESPONSE_TIMEOUT,
     DEFAULT_SEARCH_GROUNDING,
     DEFAULT_SUPPORT_BARGE_IN,
     DEFAULT_THINKING_LEVEL,
@@ -43,6 +45,8 @@ from .const import (
     PERSONAPLEX_AVAILABLE_VOICES_INFO,
     PERSONAPLEX_DEFAULT_MODEL,
     PERSONAPLEX_DEFAULT_VOICE,
+    MAX_RESPONSE_TIMEOUT,
+    MIN_RESPONSE_TIMEOUT,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
     PROVIDER_PERSONAPLEX,
@@ -183,6 +187,18 @@ def _provider_schema(
             transcribe_key,
             default=current.get(transcribe_key, default_transcribe),
         ): selector.BooleanSelector(),
+        vol.Optional(
+            CONF_RESPONSE_TIMEOUT,
+            default=current.get(CONF_RESPONSE_TIMEOUT, DEFAULT_RESPONSE_TIMEOUT),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=MIN_RESPONSE_TIMEOUT,
+                max=MAX_RESPONSE_TIMEOUT,
+                step=1,
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement="seconds",
+            )
+        ),
     }
     if hass is not None and not is_personaplex:
         apis = [

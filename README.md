@@ -195,6 +195,7 @@ upgrade to the latest version.
 | Thinking level | Gemini 3.8 Live Extended Thinking only. Choose low, medium, or high background reasoning. Higher levels may improve complex answers while increasing latency and cost. |
 | Encourage web search | OpenAI only. Encourages the model to use an exposed search-like Assist tool. This is a prompt hint, not Gemini Search grounding. Disabled by default. |
 | Support barge-in | Experimental: keeps microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires the Home Assistant Core interrupt path and a compatible full-duplex voice client or satellite. Disabled by default. |
+| Response inactivity timeout | Closes and discards a live provider session after 15–120 seconds without response activity. Defaults to 30 seconds. This does not change Home Assistant's external-VAD listening timeout. |
 
 For most assistants, choose **Gemini 3.8 Live**: it is optimized for immediate,
 low-latency conversation and direct smart-home commands. Choose **Gemini 3.8

@@ -14,11 +14,13 @@ from gemini_live.const import (
     CONF_AFFECTIVE_DIALOG,
     CONF_API_KEY,
     CONF_MODEL,
+    CONF_RESPONSE_TIMEOUT,
     CONF_SEARCH_GROUNDING,
     CONF_SUPPORT_BARGE_IN,
     CONF_THINKING_LEVEL,
     CONF_VOICE,
     DEFAULT_AFFECTIVE_DIALOG,
+    DEFAULT_RESPONSE_TIMEOUT,
     DEFAULT_SEARCH_GROUNDING,
     DEFAULT_THINKING_LEVEL,
     DEFAULT_SUPPORT_BARGE_IN,
@@ -67,6 +69,22 @@ def test_search_grounding_is_a_gemini_preference() -> None:
     )
     assert result[CONF_SEARCH_GROUNDING] is DEFAULT_SEARCH_GROUNDING
     assert DEFAULT_SEARCH_GROUNDING is False
+
+
+def test_response_timeout_defaults_and_exposes_range() -> None:
+    schema = _provider_schema(PROVIDER_GEMINI)
+    result = schema(
+        {
+            CONF_API_KEY: "key",
+            CONF_MODEL: "gemini-3.8-live",
+            CONF_VOICE: _VALID_VOICE[PROVIDER_GEMINI],
+        }
+    )
+
+    assert result[CONF_RESPONSE_TIMEOUT] == DEFAULT_RESPONSE_TIMEOUT
+    timeout_selector = _validator(schema, CONF_RESPONSE_TIMEOUT)
+    assert timeout_selector.config["min"] == 15
+    assert timeout_selector.config["max"] == 120
 
 
 def test_llm_api_selector_lists_registered_apis(monkeypatch) -> None:

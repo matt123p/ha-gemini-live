@@ -24,6 +24,7 @@
           "search_grounding": "Google Search grounding",
           "thinking_level": "Thinking level",
           "support_barge_in": "Support barge-in",
+          "response_timeout": "Response inactivity timeout",
           "affective_dialog": "Affective dialog",
           "llm_hass_api": "LLM APIs"
         },
@@ -39,6 +40,7 @@
           "search_grounding": "Allow Gemini to use Google's built-in Search tool for current and verifiable web information. Search queries may incur additional Gemini API charges.",
           "thinking_level": "Controls how much background reasoning Gemini 3.8 Live Extended Thinking uses. Higher levels can improve complex answers but may increase latency and cost.",
           "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage.",
+          "response_timeout": "Seconds without any provider response activity before the live session is discarded. Increase this for slow models or long-running tool calls. This does not change Home Assistant's external-VAD listening timeout.",
           "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 2.5 Flash Native Audio Preview (12-2025).",
           "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use. Select Assist for smart-home control and Memory Management for long-term memory."
         }
@@ -58,6 +60,7 @@
           "search_grounding": "Google Search grounding",
           "thinking_level": "Thinking level",
           "support_barge_in": "Support barge-in",
+          "response_timeout": "Response inactivity timeout",
           "affective_dialog": "Affective dialog",
           "llm_hass_api": "LLM APIs"
         },
@@ -66,6 +69,7 @@
           "search_grounding": "Allow Gemini to use Google's built-in Search tool for current and verifiable web information. Search queries may incur additional Gemini API charges.",
           "thinking_level": "Controls how much background reasoning Gemini 3.8 Live Extended Thinking uses. Higher levels can improve complex answers but may increase latency and cost.",
           "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage.",
+          "response_timeout": "Seconds without any provider response activity before the live session is discarded. Increase this for slow models or long-running tool calls. This does not change Home Assistant's external-VAD listening timeout.",
           "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 2.5 Flash Native Audio Preview (12-2025).",
           "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use."
         }
@@ -92,6 +96,7 @@
           "search_grounding": "Google Search grounding",
           "thinking_level": "Thinking level",
           "support_barge_in": "Support barge-in",
+          "response_timeout": "Response inactivity timeout",
           "affective_dialog": "Affective dialog",
           "llm_hass_api": "LLM APIs"
         },
@@ -100,6 +105,7 @@
           "search_grounding": "Allow Gemini to use Google's built-in Search tool for current and verifiable web information. Search queries may incur additional Gemini API charges.",
           "thinking_level": "Controls how much background reasoning Gemini 3.8 Live Extended Thinking uses. Higher levels can improve complex answers but may increase latency and cost.",
           "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage.",
+          "response_timeout": "Seconds without any provider response activity before the live session is discarded. Increase this for slow models or long-running tool calls. This does not change Home Assistant's external-VAD listening timeout.",
           "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 2.5 Flash Native Audio Preview (12-2025).",
           "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use. Select Assist for smart-home control and Memory Management for long-term memory."
         }
