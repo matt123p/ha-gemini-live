@@ -4,7 +4,7 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## 1.0.10
 
-- Updated `google-genai` to `2.25.0` to match Home Assistant's dependency
+- Require `google-genai>=2.25.0` so the SDK follows Home Assistant updates
   and resolve the hassfest requirements conflict.
 
 - Added a configurable response inactivity timeout, from 15 to 120 seconds. The
