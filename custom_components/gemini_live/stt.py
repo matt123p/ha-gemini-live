@@ -284,7 +284,13 @@ def _add_search_tool_instruction(
 
 
 def _validate_tool_results(value: Any) -> Any:
-    """Recursively convert non-json-serializable tool results."""
+    """Convert HA tool responses to provider JSON, including Core 2026.10."""
+    # Older Core versions return a dictionary and have no ToolResult class.
+    result_type = getattr(llm, "ToolResult", None)
+    if result_type is not None and isinstance(value, result_type):
+        data = _validate_tool_results(value.data)
+        # Convey failed calls to the provider without dropping the HA error flag.
+        return {"error": data} if value.error else data
     if isinstance(value, (datetime.time, datetime.date)):
         return value.isoformat()
     if isinstance(value, list):
@@ -733,8 +739,9 @@ class LiveModelSTT(SpeechToTextEntity):
                         await session.end_audio()
                 except asyncio.CancelledError:
                     _LOGGER.warning(
-                        "[turn=%s] audio sender cancelled — the model started replying",
+                        "[turn=%s] audio sender cancelled (response_started=%s)",
                         turn_id,
+                        gemini_replied.is_set(),
                     )
                     raise
                 except Exception as exc:  # noqa: BLE001

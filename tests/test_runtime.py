@@ -4,6 +4,8 @@ import asyncio
 import contextlib
 from types import SimpleNamespace
 
+import pytest
+
 from gemini_live.live import LiveConfig
 from gemini_live.runtime import (
     AudioStream,
@@ -41,7 +43,7 @@ def _pipeline_run(
         ),
         SimpleNamespace(
             type=PipelineEventType.STT_START,
-            data=None,
+            data={"engine": stt_entity_id},
             timestamp=started_at,
         ),
     ]
@@ -97,6 +99,32 @@ def test_active_pipeline_context_preserves_the_run_context():
     assert pipeline_context is source_context
     assert pipeline_context.user_id == "voice-user"
     assert pipeline_context.parent_id == "parent-context"
+
+
+@pytest.mark.parametrize("provider_attribute", [False, True])
+def test_active_pipeline_context_matches_stt_event_engine(provider_attribute):
+    run = _pipeline_run(
+        "run-1",
+        conversation_id="conversation-1",
+        started_at="1",
+        context=Context(),
+    )
+    if provider_attribute:
+        run.stt_provider = SimpleNamespace(entity_id="stt.other")
+    else:
+        del run.stt_provider
+    other = _pipeline_run(
+        "run-2",
+        conversation_id="conversation-2",
+        started_at="2",
+        context=Context(),
+        stt_entity_id="stt.other",
+    )
+    other.stt_provider = SimpleNamespace(entity_id="stt.live_model")
+
+    assert active_pipeline_context(
+        _hass_with_pipeline_runs(run, other), "stt.live_model"
+    ) == ("conversation-1", "device-1", run.context)
 
 
 def test_active_pipeline_context_selects_the_most_recent_concurrent_run():

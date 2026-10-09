@@ -1,10 +1,12 @@
 """Tests for the Gemini Live TTS platform."""
 
 import asyncio
+import io
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import Mock
+import wave
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -14,9 +16,9 @@ from custom_components.gemini_live.const import (
     DOMAIN,
     GEMINI_TURN_STORE_KEY,
 )
-from custom_components.gemini_live.runtime import AudioStream
+from custom_components.gemini_live.runtime import AudioStream, TurnStore
 from custom_components.gemini_live.tts import GeminiLiveTTS
-from custom_components.gemini_live.utils import streaming_wav_header
+from custom_components.gemini_live.utils import pcm_to_wav, streaming_wav_header
 
 
 @dataclass
@@ -125,6 +127,39 @@ async def test_interruptible_tts_rejects_non_native_audio() -> None:
     request = SimpleNamespace(options={"preferred_sample_rate": 48000})
     with pytest.raises(HomeAssistantError, match="16 kHz"):
         await entity.async_stream_tts_audio(request)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("barge_in", [False, True])
+@pytest.mark.parametrize("cached_audio", [False, True])
+async def test_buffered_and_silent_wav_support_interruptible_playback(
+    monkeypatch: pytest.MonkeyPatch, barge_in: bool, cached_audio: bool
+) -> None:
+    """Preserve PCM while framing every barge-in fallback as a streaming WAV."""
+    monkeypatch.setattr(
+        "custom_components.gemini_live.tts.TTSAudioResponse", _InterruptResponse
+    )
+    entity = _make_tts(barge_in=barge_in, audio=AudioStream())
+    store = TurnStore()
+    pcm = b"\x01\x02" * 100
+    if cached_audio:
+        store.add_audio("-- gemini live --", pcm_to_wav(pcm))
+    else:
+        pcm = b"\x00" * 32000
+    entity.hass.data[DOMAIN][entity.entry.entry_id][GEMINI_TURN_STORE_KEY] = store
+    request = SimpleNamespace(message_gen=_message_gen(), options={})
+
+    response = await entity.async_stream_tts_audio(request)
+    chunks = [chunk async for chunk in response.data_gen]
+    if barge_in:
+        assert chunks == [streaming_wav_header(), pcm]
+    else:
+        assert chunks == [pcm_to_wav(pcm)]
+    with wave.open(io.BytesIO(b"".join(chunks)), "rb") as wav:
+        assert wav.getnchannels() == 1
+        assert wav.getsampwidth() == 2
+        assert wav.getframerate() == 16000
+        assert wav.readframes(wav.getnframes()) == pcm
 
 
 @pytest.mark.asyncio

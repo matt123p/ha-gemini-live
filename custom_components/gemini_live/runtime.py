@@ -526,9 +526,6 @@ def active_pipeline_context(
         candidates: list[tuple[str, str, str | None, Context | None]] = []
         for runs in pipeline_data.pipeline_runs._pipeline_runs.values():
             for run in runs.values():
-                provider = getattr(run, "stt_provider", None)
-                if getattr(provider, "entity_id", None) != stt_entity_id:
-                    continue
                 debug = pipeline_data.pipeline_debug.get(run.pipeline.id, {}).get(
                     run.id
                 )
@@ -542,7 +539,11 @@ def active_pipeline_context(
                     if event.type == PipelineEventType.RUN_START and event.data:
                         conversation_id = event.data.get("conversation_id")
                     elif event.type == PipelineEventType.STT_START:
-                        stt_started = event.timestamp
+                        stt_started = (
+                            event.timestamp
+                            if event.data and event.data.get("engine") == stt_entity_id
+                            else None
+                        )
                         stt_ended = False
                     elif event.type in (
                         PipelineEventType.STT_END,

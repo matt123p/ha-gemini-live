@@ -191,13 +191,16 @@ class GeminiLiveSession:
                     interrupted = bool(getattr(content, "interrupted", False))
                     if interrupted:
                         interrupted_turn = True
-                    if content.turn_complete and (
-                        interrupted_turn or interaction_in_progress
-                    ):
-                        # The SDK ends each receive() iterator at turn_complete.
-                        # Re-enter it so the replacement response can arrive.
-                        receive_next_turn = (
-                            self._support_barge_in or self._extended_thinking
+                    if content.turn_complete:
+                        # The SDK ends receive() at each completed server turn.
+                        # In barge-in mode, ordinary completion must not close
+                        # the listener: the satellite can still be playing and
+                        # the same session must accept another user utterance.
+                        # The STT owner closes/cancels this iterator when its
+                        # pipeline microphone stream ends.
+                        receive_next_turn = self._support_barge_in or (
+                            self._extended_thinking
+                            and (interrupted_turn or interaction_in_progress)
                         )
                     terminal_turn = bool(content.turn_complete) and not (
                         self._extended_thinking and interaction_in_progress

@@ -1,5 +1,6 @@
 """Tests for the Gemini Live adapter's barge-in behaviour."""
 
+import asyncio
 import sys
 from types import SimpleNamespace
 
@@ -59,7 +60,7 @@ class _TurnBoundedFakeSDKSession:
 
     async def receive(self):
         self.receive_count += 1
-        for response in next(self._turns):
+        for response in next(self._turns, []):
             yield response
 
 
@@ -363,7 +364,7 @@ async def test_gemini_barge_in_reenters_sdk_receive_for_replacement_turn():
         LiveEvent(turn_complete=True),
         LiveEvent(turn_complete=True),
     ]
-    assert sdk_session.receive_count == 2
+    assert sdk_session.receive_count == 3
 
 
 async def test_gemini_client_passes_barge_in_mode_to_session():
@@ -379,7 +380,7 @@ async def test_gemini_client_passes_barge_in_mode_to_session():
         events = await _collect(session)
 
     assert events[-1] == LiveEvent(turn_complete=True)
-    assert sdk_session.receive_count == 2
+    assert sdk_session.receive_count == 3
 
 
 async def test_gemini_legacy_does_not_reenter_sdk_receive():
@@ -399,3 +400,66 @@ async def test_gemini_legacy_does_not_reenter_sdk_receive():
 
     assert events == [LiveEvent(interrupted=True, turn_complete=True)]
     assert sdk_session.receive_count == 1
+
+
+async def test_barge_in_receives_next_utterance_after_normal_turn_completion():
+    sdk_session = _TurnBoundedFakeSDKSession(
+        [
+            [_sdk_response(_server_content(turn_complete=True))],
+            [
+                _sdk_response(
+                    _server_content(
+                        input_transcription=SimpleNamespace(text="Stop, a new question")
+                    )
+                ),
+                _sdk_response(
+                    _server_content(
+                        model_turn=SimpleNamespace(
+                            parts=[
+                                SimpleNamespace(
+                                    text=None,
+                                    inline_data=SimpleNamespace(data=b"replacement"),
+                                )
+                            ]
+                        )
+                    )
+                ),
+                _sdk_response(_server_content(turn_complete=True)),
+            ],
+        ]
+    )
+    events = await _collect(GeminiLiveSession(sdk_session, support_barge_in=True))
+    assert events == [
+        LiveEvent(turn_complete=True),
+        LiveEvent(input_transcript="Stop, a new question"),
+        LiveEvent(audio=b"replacement"),
+        LiveEvent(turn_complete=True),
+    ]
+    assert sdk_session.receive_count == 3  # Two turns followed by transport EOF.
+
+
+async def test_barge_in_listener_waits_after_normal_completion_and_can_be_cancelled():
+    entered_next_turn = asyncio.Event()
+    never_respond = asyncio.Event()
+
+    class WaitingSDKSession:
+        def __init__(self):
+            self.receive_count = 0
+
+        async def receive(self):
+            self.receive_count += 1
+            if self.receive_count == 1:
+                yield _sdk_response(_server_content(turn_complete=True))
+                return
+            entered_next_turn.set()
+            await never_respond.wait()
+
+    session = GeminiLiveSession(WaitingSDKSession(), support_barge_in=True)
+    task = asyncio.create_task(_collect(session))
+    try:
+        await asyncio.wait_for(entered_next_turn.wait(), timeout=1)
+        assert not task.done()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert task.cancelled()

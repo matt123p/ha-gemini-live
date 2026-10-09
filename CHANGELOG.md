@@ -2,6 +2,24 @@
 
 All notable changes to Gemini Live for Home Assistant are documented here.
 
+## Unreleased
+
+- Fixed voice turns being processed twice after Core's pipeline refactor by
+  resolving the active STT run from its event engine rather than its removed
+  provider attribute.
+- Fixed buffered TTS audio and fallback silence being rejected by ESPHome
+  during barge-in playback by sending an unknown-length WAV header.
+- Fixed Home Assistant Core 2026.10 tool calls failing with a Gemini
+  `FunctionResponse` validation error. Convert `llm.ToolResult` to JSON before
+  sending it to the provider, preserve failed-call information, and continue
+  supporting dictionary results from older Core versions.
+- Fixed the Gemini receiver closing after a normal `turnComplete` in barge-in
+  mode. Keep listening across completed provider turns until the pipeline
+  closes or cancels the microphone stream, allowing interruptions during
+  satellite playback and subsequent user utterances.
+- Corrected audio-sender cancellation logs to report whether a response has
+  started, rather than attributing every cancellation to the model replying.
+
 ## 1.0.10
 
 - Require `google-genai>=2.25.0` so the SDK follows Home Assistant updates
