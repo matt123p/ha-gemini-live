@@ -123,6 +123,10 @@
       "title": "Gemini Live billing unavailable",
       "description": "The Google AI project used by **{entry_title}** cannot process Gemini Live requests because its spending cap or available prepaid credit balance has been exhausted. [Manage the project's billing]({spending_cap_url}), then try Gemini Live again. This issue will clear automatically after Gemini Live connects successfully."
     },
+    "quota_exceeded": {
+      "title": "Gemini Live API quota exceeded",
+      "description": "The Google AI project used by **{entry_title}** cannot process Gemini Live requests because an API quota has been exceeded. This can be a request, token, or other usage limit; it does not necessarily mean billing credit is exhausted. [Check the project's API limits and usage]({quota_url}), and check billing if necessary, then try again. This issue will clear automatically after Gemini Live connects successfully."
+    },
     "openai_no_credits": {
       "title": "OpenAI credits depleted",
       "description": "The OpenAI account used by **{entry_title}** cannot process GPT Realtime requests because it has no credits remaining. [Add credits to the account]({billing_url}), then try GPT Realtime again. This issue will clear automatically after GPT Realtime connects successfully."

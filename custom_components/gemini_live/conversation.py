@@ -52,8 +52,11 @@ from .stt import (
     _add_end_conversation_instruction,
     _add_end_conversation_tool,
     _add_search_tool_instruction,
+    _clear_api_issues,
     _format_tools_for_live,
     _is_connection_closed_ok,
+    _report_api_error,
+    _user_visible_api_error,
     _validate_tool_results,
 )
 from .openai import OpenAIRealtimeClient
@@ -323,14 +326,15 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
             user_text[:120],
         )
 
-        client = await self._async_create_client(api_key)
-
+        session = None
         try:
+            client = await self._async_create_client(api_key)
             async with session_manager.acquire(
                 conversation_id,
                 client,
                 live_config,
             ) as session:
+                _clear_api_issues(self.hass, self.entry, self.integration_domain)
                 await session.send_text(user_text)
 
                 async with asyncio.timeout(30):
@@ -446,6 +450,15 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
             )
             return None
         except Exception as exc:  # noqa: BLE001
+            if user_message := _user_visible_api_error(exc):
+                _report_api_error(
+                    self.hass, self.entry, self.integration_domain, user_message
+                )
+                session_manager.complete_conversation(conversation_id)
+                _LOGGER.warning(
+                    "%s API request failed: %s", self.integration_name, user_message
+                )
+                return user_message
             if _is_connection_closed_ok(exc):
                 _LOGGER.warning(
                     "[turn=%s] %s text path connection closed normally",

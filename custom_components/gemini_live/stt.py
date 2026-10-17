@@ -156,6 +156,14 @@ _OPENAI_NO_CREDITS_USER_MESSAGE = (
     f"remaining. Please go to {_OPENAI_NO_CREDITS_URL} to add credits."
 )
 
+_QUOTA_ERROR_MARKER = "you exceeded your current quota"
+_QUOTA_URL = "https://ai.dev/rate-limit"
+_QUOTA_USER_MESSAGE = (
+    "Gemini Live is unavailable because your Google AI project has exceeded "
+    "an API quota. Please check your project's API limits, usage, and billing "
+    f"at {_QUOTA_URL}, then try again."
+)
+
 END_CONVERSATION_TOOL_NAME = "end_conversation"
 
 _END_CONVERSATION_INSTRUCTION = (
@@ -190,9 +198,21 @@ def _is_search_tool_name(name: str) -> bool:
     return any(hint in lowered_name for hint in _SEARCH_TOOL_HINTS)
 
 
-def _is_connection_closed_ok(exc: Exception) -> bool:
-    """Return true for websockets' normal-close exception without importing it."""
-    return exc.__class__.__name__ == "ConnectionClosedOK"
+def _is_connection_closed_ok(exc: BaseException) -> bool:
+    """Recognize normal WebSocket closure, including Google SDK wrappers."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if current.__class__.__name__ == "ConnectionClosedOK":
+            return True
+        if (
+            current.__class__.__name__ == "APIError"
+            and getattr(current, "code", None) == 1000
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _user_visible_api_error(exc: BaseException) -> str | None:
@@ -208,6 +228,8 @@ def _user_visible_api_error(exc: BaseException) -> str | None:
             return _PREPAYMENT_CREDITS_USER_MESSAGE
         if _OPENAI_NO_CREDITS_ERROR_MARKER in error_text:
             return _OPENAI_NO_CREDITS_USER_MESSAGE
+        if _QUOTA_ERROR_MARKER in error_text:
+            return _QUOTA_USER_MESSAGE
         current = current.__cause__ or current.__context__
     return None
 
@@ -225,6 +247,57 @@ def _prepayment_credits_issue_id(entry_id: str) -> str:
 def _openai_no_credits_issue_id(entry_id: str) -> str:
     """Return the OpenAI credits Repairs issue ID for one config entry."""
     return f"{_OPENAI_NO_CREDITS_ISSUE_PREFIX}_{entry_id}"
+
+
+def _report_api_error(
+    hass: HomeAssistant, entry: ConfigEntry, domain: str, user_message: str
+) -> None:
+    """Create the same actionable Repairs issue for voice and typed requests."""
+    if user_message == _SPENDING_CAP_USER_MESSAGE:
+        issue_id = _spending_cap_issue_id(entry.entry_id)
+        issue_url = _SPENDING_CAP_URL
+        translation_key = "spending_cap_exceeded"
+        url_placeholder = "spending_cap_url"
+    elif user_message == _PREPAYMENT_CREDITS_USER_MESSAGE:
+        issue_id = _prepayment_credits_issue_id(entry.entry_id)
+        issue_url = _PREPAYMENT_CREDITS_URL
+        translation_key = "spending_cap_exceeded"
+        url_placeholder = "spending_cap_url"
+    elif user_message == _QUOTA_USER_MESSAGE:
+        issue_id = f"quota_exceeded_{entry.entry_id}"
+        issue_url = _QUOTA_URL
+        translation_key = "quota_exceeded"
+        url_placeholder = "quota_url"
+    else:
+        issue_id = _openai_no_credits_issue_id(entry.entry_id)
+        issue_url = _OPENAI_NO_CREDITS_URL
+        translation_key = "openai_no_credits"
+        url_placeholder = "billing_url"
+    async_create_issue(
+        hass,
+        domain,
+        issue_id,
+        is_fixable=False,
+        is_persistent=False,
+        learn_more_url=issue_url,
+        severity=IssueSeverity.ERROR,
+        translation_key=translation_key,
+        translation_placeholders={
+            "entry_title": entry.title,
+            url_placeholder: issue_url,
+        },
+    )
+
+
+def _clear_api_issues(hass: HomeAssistant, entry: ConfigEntry, domain: str) -> None:
+    """Clear provider-limit issues after a successful connection."""
+    for issue_id in (
+        _spending_cap_issue_id(entry.entry_id),
+        _prepayment_credits_issue_id(entry.entry_id),
+        _openai_no_credits_issue_id(entry.entry_id),
+        f"quota_exceeded_{entry.entry_id}",
+    ):
+        async_delete_issue(hass, domain, issue_id)
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +744,7 @@ class LiveModelSTT(SpeechToTextEntity):
         audio_response_bytes = 0
         audio_sent = False
         sound_selected = False
+        connection_closed = False
         last_response_activity = time.monotonic()
         gemini_replied = asyncio.Event()
         first_audio = asyncio.Event()
@@ -703,21 +777,7 @@ class LiveModelSTT(SpeechToTextEntity):
             client,
             live_config,
         ) as session:
-            async_delete_issue(
-                self.hass,
-                self.integration_domain,
-                _spending_cap_issue_id(self.entry.entry_id),
-            )
-            async_delete_issue(
-                self.hass,
-                self.integration_domain,
-                _prepayment_credits_issue_id(self.entry.entry_id),
-            )
-            async_delete_issue(
-                self.hass,
-                self.integration_domain,
-                _openai_no_credits_issue_id(self.entry.entry_id),
-            )
+            _clear_api_issues(self.hass, self.entry, self.integration_domain)
             _LOGGER.warning(
                 "[turn=%s] acquired live-model session conversation=%s",
                 turn_id,
@@ -800,7 +860,12 @@ class LiveModelSTT(SpeechToTextEntity):
                     )
                     raise
                 except Exception as exc:  # noqa: BLE001
-                    _LOGGER.exception(
+                    log_failure = (
+                        _LOGGER.warning
+                        if _is_connection_closed_ok(exc) or self._api_error_message(exc)
+                        else _LOGGER.exception
+                    )
+                    log_failure(
                         "[turn=%s] Failure inside send_audio: %s (last outgoing client message: %s)",
                         turn_id,
                         exc,
@@ -812,6 +877,7 @@ class LiveModelSTT(SpeechToTextEntity):
                 nonlocal audio_response_bytes, audio_response_chunk_count
                 nonlocal last_response_activity
                 nonlocal sound_selected
+                nonlocal connection_closed
                 replacement_response_pending = False
                 try:
                     _LOGGER.warning("[turn=%s] receive_responses started", turn_id)
@@ -1106,9 +1172,19 @@ class LiveModelSTT(SpeechToTextEntity):
                     raise
                 except Exception as exc:  # noqa: BLE001
                     if _is_connection_closed_ok(exc):
+                        connection_closed = True
+                        session_manager.retire_session(conversation_id)
                         _LOGGER.warning(
                             "[turn=%s] live-model connection closed normally",
                             turn_id,
+                        )
+                        await response_audio_stream.add_chunk(
+                            response_audio_resampler.flush()
+                        )
+                        return
+                    elif user_message := self._api_error_message(exc):
+                        _LOGGER.warning(
+                            "%s API request failed: %s", self.integration_name, user_message
                         )
                     else:
                         _LOGGER.exception(
@@ -1307,6 +1383,13 @@ class LiveModelSTT(SpeechToTextEntity):
         input_transcript = "".join(input_transcript_parts).strip()
         all_audio_24k_len = audio_response_bytes
 
+        if connection_closed and not first_audio.is_set() and not response_text:
+            _LOGGER.warning(
+                "[turn=%s] connection closed before a usable model response arrived",
+                turn_id,
+            )
+            return SpeechResult(None, SpeechResultState.ERROR)
+
         if first_audio.is_set():
             _LOGGER.warning(
                 "STT: live-model audio ready: text=%d chars, raw_audio=%d bytes",
@@ -1401,38 +1484,8 @@ class LiveModelSTT(SpeechToTextEntity):
                 result_future.set_result(SpeechResult(None, SpeechResultState.ERROR))
             except Exception as exc:  # noqa: BLE001
                 if user_message := self._api_error_message(exc):
-                    if user_message == _SPENDING_CAP_USER_MESSAGE:
-                        issue_id = _spending_cap_issue_id(self.entry.entry_id)
-                        issue_url = _SPENDING_CAP_URL
-                        translation_key = "spending_cap_exceeded"
-                        url_placeholder = "spending_cap_url"
-                        reason = "the monthly spending cap was exceeded"
-                    elif user_message == _PREPAYMENT_CREDITS_USER_MESSAGE:
-                        issue_id = _prepayment_credits_issue_id(self.entry.entry_id)
-                        issue_url = _PREPAYMENT_CREDITS_URL
-                        translation_key = "spending_cap_exceeded"
-                        url_placeholder = "spending_cap_url"
-                        reason = "prepayment credits are depleted"
-                    else:
-                        issue_id = _openai_no_credits_issue_id(self.entry.entry_id)
-                        issue_url = _OPENAI_NO_CREDITS_URL
-                        translation_key = "openai_no_credits"
-                        url_placeholder = "billing_url"
-                        reason = "OpenAI credits are depleted"
-                    translation_placeholders = {
-                        "entry_title": self.entry.title,
-                        url_placeholder: issue_url,
-                    }
-                    async_create_issue(
-                        self.hass,
-                        self.integration_domain,
-                        issue_id,
-                        is_fixable=False,
-                        is_persistent=False,
-                        learn_more_url=issue_url,
-                        severity=IssueSeverity.ERROR,
-                        translation_key=translation_key,
-                        translation_placeholders=translation_placeholders,
+                    _report_api_error(
+                        self.hass, self.entry, self.integration_domain, user_message
                     )
                     entry_data = self.hass.data[self.integration_domain][
                         self.entry.entry_id
@@ -1451,15 +1504,21 @@ class LiveModelSTT(SpeechToTextEntity):
                         )
                     )
                     _LOGGER.warning(
-                        "%s is unavailable because %s",
+                        "%s API request failed: %s",
                         self.integration_name,
-                        reason,
+                        user_message,
                     )
                     result_future.set_result(
                         SpeechResult(user_message, SpeechResultState.SUCCESS)
                     )
                 else:
-                    _LOGGER.exception("%s audio turn failed", self.integration_name)
+                    if _is_connection_closed_ok(exc):
+                        _LOGGER.warning(
+                            "%s connection closed before the audio turn finished",
+                            self.integration_name,
+                        )
+                    else:
+                        _LOGGER.exception("%s audio turn failed", self.integration_name)
                     result_future.set_result(
                         SpeechResult(None, SpeechResultState.ERROR)
                     )

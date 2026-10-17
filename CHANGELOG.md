@@ -4,6 +4,13 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Added actionable API quota errors and Repairs issues for voice and typed
+  conversations, with links to check Google AI limits, usage, and billing.
+  Generic quota errors no longer imply that billing credit is exhausted, and
+  provider-limit Repairs issues clear after a successful connection. Refs #13.
+- Fixed normal WebSocket closures wrapped by the Google SDK being logged as
+  unexpected errors. Preserve any usable response, retire closed sessions, and
+  handle typed-conversation connection failures before a session is available.
 - Simplified `play_sound` to a tool with no arguments that plays only the `done`
   cue. Removed the other sound assets and choices from the API.
 - Successful sound responses now end both voice and typed conversations, just
