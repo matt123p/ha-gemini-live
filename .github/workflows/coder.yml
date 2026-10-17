@@ -29,8 +29,9 @@ jobs:
         env:
           CODER_URL: ${{ secrets.CODER_URL }}
           CODER_TOKEN: ${{ secrets.CODER_TOKEN }}
-          CODER_TRIAGE_WORKSPACE_ID: ${{ vars.CODER_TRIAGE_WORKSPACE_ID }}
-          CODER_ORG: ${{ vars.CODER_ORG }}
+          # Accept settings stored in either repository configuration tab.
+          CODER_TRIAGE_WORKSPACE_ID: ${{ secrets.CODER_TRIAGE_WORKSPACE_ID || vars.CODER_TRIAGE_WORKSPACE_ID }}
+          CODER_ORG: ${{ secrets.CODER_ORG || vars.CODER_ORG }}
         shell: bash
         run: |
           for name in CODER_URL CODER_TOKEN CODER_TRIAGE_WORKSPACE_ID CODER_ORG; do
@@ -50,8 +51,8 @@ jobs:
         with:
           coder-url: ${{ secrets.CODER_URL }}
           coder-token: ${{ secrets.CODER_TOKEN }}
-          coder-organization: ${{ vars.CODER_ORG }}
-          workspace-id: ${{ vars.CODER_TRIAGE_WORKSPACE_ID }}
+          coder-organization: ${{ secrets.CODER_ORG || vars.CODER_ORG }}
+          workspace-id: ${{ secrets.CODER_TRIAGE_WORKSPACE_ID || vars.CODER_TRIAGE_WORKSPACE_ID }}
           model-config-id: ${{ vars.CODER_MODEL_CONFIG_ID }}
           github-url: ${{ github.event.issue.html_url }}
           github-token: ${{ github.token }}
