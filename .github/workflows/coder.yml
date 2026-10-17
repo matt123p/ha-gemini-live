@@ -47,6 +47,7 @@ jobs:
 
       # No checkout: issue content never executes on the Actions runner.
       - name: Investigate issue with Coder
+        id: triage
         uses: coder/agents-chat-action@9b3ac42d568e9206f9cd51a97789820d6935cc8d # v0.5.1
         with:
           coder-url: ${{ secrets.CODER_URL }}
@@ -71,7 +72,116 @@ jobs:
             hypotheses and explain what could not be verified. Return the report
             and its path in the chat for this workflow to publish. Do not change
             labels, close issues, post comments yourself, push, or open a PR.
+
+            PUBLICATION: This workflow will publish your full report publicly
+            as a GitHub issue comment, labelled as AI-generated and unreviewed.
+            Write for the issue author and maintainers: plain English, short
+            sentences, concise Markdown, and no internal chat commentary.
+            Aim for 300-600 words; use fewer when the issue is simple. Use these
+            headings: Summary, Findings, Proposed fix, Validation, Open questions.
+            Lead with the problem and impact. Use short bullets and numbered
+            steps where helpful, inline code for identifiers, and source links
+            for evidence. Mark hypotheses clearly; never claim tests were run.
+            Include only relevant details; omit empty sections, repeated issue
+            text, raw logs, tool output, secrets, private URLs, personal data,
+            and workspace paths. Do not include raw HTML or @mentions.
+            If access is missing, explain what could not be checked and what
+            information is needed. Do not invent findings to fill the template.
+
+            Publication reference: ${{ github.run_id }}-${{ github.run_attempt }}
+            When the report is ready, return its COMPLETE Markdown text in your
+            final assistant message, identical to the saved report, between
+            these exact marker lines (outside any code fence):
+            <!-- triage-report:${{ github.run_id }}-${{ github.run_attempt }}:start -->
+            [full report here]
+            <!-- triage-report:${{ github.run_id }}-${{ github.run_attempt }}:end -->
+            Do not include these markers in progress updates or clarification
+            questions. A file path or a summary alone is not the full report.
             Wait for maintainer feedback.
           wait: complete
           wait-timeout-seconds: "900"
-          comment-on-issue: "true"
+          comment-on-issue: "false"
+
+      - name: Publish AI-generated report
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          CODER_URL: ${{ secrets.CODER_URL }}
+          CODER_TOKEN: ${{ secrets.CODER_TOKEN }}
+          CHAT_ID: ${{ steps.triage.outputs.chat-id }}
+          PUBLICATION_REFERENCE: ${{ github.run_id }}-${{ github.run_attempt }}
+        with:
+          script: |
+            const { CODER_URL, CODER_TOKEN, CHAT_ID, PUBLICATION_REFERENCE } = process.env;
+            if (!/^[0-9a-f-]{36}$/i.test(CHAT_ID || '')) {
+              throw new Error('Coder did not return a valid chat ID. No report was published.');
+            }
+            const base = new URL(CODER_URL);
+            if (base.protocol !== 'https:' || base.username || base.password) {
+              throw new Error('CODER_URL must be an HTTPS deployment URL without credentials.');
+            }
+            const messages = [];
+            let before;
+            // Walk backwards if tool activity fills the newest page before the prompt.
+            for (let page = 0; page < 10; page++) {
+              const url = new URL(`/api/v2/chats/${CHAT_ID}/messages?limit=100`, base);
+              if (before !== undefined) url.searchParams.set('before_id', before);
+              // Never print transcripts or API error bodies: they may contain private data.
+              const response = await fetch(url, {
+                headers: { 'Coder-Session-Token': CODER_TOKEN },
+                redirect: 'error',
+                signal: AbortSignal.timeout(15000),
+              });
+              if (!response.ok) {
+                throw new Error(`Could not retrieve the Coder report (HTTP ${response.status}).`);
+              }
+              const data = await response.json();
+              if (!Array.isArray(data.messages)) {
+                throw new Error('Unexpected Coder messages response. No report was published.');
+              }
+              messages.push(...data.messages);
+              if (messages.some(message => message.role === 'user') || !data.has_more) break;
+              const oldest = Math.min(...data.messages.map(message => message.id));
+              if (!Number.isFinite(oldest) || (before !== undefined && oldest >= before)) break;
+              before = oldest;
+            }
+            messages.sort((a, b) => a.id - b.id);
+            const text = message => (message.content || [])
+              .filter(part => part.type === 'text' && typeof part.text === 'string')
+              .map(part => part.text).join('\n');
+            // Only accept the final assistant reply after this run's latest prompt.
+            const latestUser = messages.findLastIndex(message => message.role === 'user');
+            if (latestUser < 0 || !text(messages[latestUser]).includes(
+              `Publication reference: ${PUBLICATION_REFERENCE}`
+            )) {
+              throw new Error('Current triage prompt was not found. No old report was published.');
+            }
+            const reply = messages.slice(latestUser + 1)
+              .findLast(message => message.role === 'assistant');
+            const match = text(reply || {}).match(new RegExp(
+              `^\\s*<!-- triage-report:${PUBLICATION_REFERENCE}:start -->\\s*\\n([\\s\\S]+?)\\n\\s*<!-- triage-report:${PUBLICATION_REFERENCE}:end -->\\s*$`
+            ));
+            if (!match || !match[1].trim()) {
+              throw new Error('No complete report was returned. Check the Coder chat for questions or incomplete work.');
+            }
+            const report = match[1].trim();
+            const marker = `<!-- coder-triage-report:${context.runId} -->`;
+            const body = `${marker}\n## AI-generated triage report\n\n` +
+              `> Generated by an AI agent using Coder. This report has not been reviewed by a maintainer and may contain errors.\n\n` +
+              report;
+            if (body.length > 60000) {
+              throw new Error('Report is too long for one issue comment; shorten it in Coder and run triage again.');
+            }
+            const target = { ...context.repo, issue_number: context.issue.number };
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...target, per_page: 100,
+            });
+            const existing = comments.find(comment =>
+              comment.user?.login === 'github-actions[bot]' && comment.body?.startsWith(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({ ...target, body });
+            }
