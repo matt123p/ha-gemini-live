@@ -34,6 +34,33 @@ MAX_RESPONSE_TIMEOUT = 120
 PROVIDER_GEMINI = "gemini"
 PROVIDER_OPENAI = "openai"
 PROVIDER_PERSONAPLEX = "personaplex"
+PROVIDER_QWEN = "qwen"
+CONF_TRANSCRIBE_QWEN = "transcribe_qwen"
+QWEN_REALTIME_URL = "wss://maas.qwencloudapi.com/api-ws/v1/realtime"
+QWEN_DEFAULT_MODEL = "qwen3.8-omni-flash-realtime"
+QWEN_AVAILABLE_MODELS = [
+    QWEN_DEFAULT_MODEL,
+    "qwen3.5-omni-plus-realtime",
+    "qwen3.5-omni-flash-realtime",
+    "qwen3.5-omni-plus-realtime-2026-03-15",
+    "qwen3.5-omni-flash-realtime-2026-03-15",
+]
+QWEN_SUPPORTED_LANGUAGES = [
+    "en", "en-US", "zh", "fr", "de", "ru", "it", "es", "pt", "ja", "ko",
+    "th", "id", "ar", "vi", "tr", "fi", "pl", "hi", "nl", "cs", "ur",
+    "tl", "sv", "da", "he", "is", "ms", "no", "fa",
+]
+QWEN_DEFAULT_VOICE = "Tina"
+QWEN_AVAILABLE_VOICES = [
+    "Tina", "Cindy", "Serena", "Ryan", "Jennifer", "Katerina", "Aiden", "Mione",
+]
+
+
+def qwen_supports_tools(model: str | None) -> bool:
+    """Only expose documented, function-calling Omni Realtime models."""
+    return model in QWEN_AVAILABLE_MODELS
+
+
 GEMINI_LIVE_TTS_PLACEHOLDER = "-- gemini live --"
 DEFAULT_SYSTEM_INSTRUCTION = (
     "You are a helpful, concise voice assistant for the user's smart home, powered by Home Assistant. "

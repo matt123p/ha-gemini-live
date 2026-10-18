@@ -30,6 +30,9 @@ from .const import (
     GEMINI_TURN_STORE_KEY,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
+    PROVIDER_QWEN,
+    CONF_MODEL,
+    QWEN_SUPPORTED_LANGUAGES,
     SUPPORTED_LANGUAGES,
 )
 from .runtime import AudioStream
@@ -46,7 +49,7 @@ async def async_setup_entry(
     """Set up Gemini Live TTS platform."""
     config = {**config_entry.data, **config_entry.options}
     provider = config.get(CONF_PROVIDER, PROVIDER_GEMINI)
-    entity_class = GPTRealtimeTTS if provider == PROVIDER_OPENAI else GeminiLiveTTS
+    entity_class = {PROVIDER_OPENAI: GPTRealtimeTTS, PROVIDER_QWEN: QwenRealtimeTTS}.get(provider, GeminiLiveTTS)
     async_add_entities([entity_class(config_entry)])
 
 
@@ -225,3 +228,11 @@ class GPTRealtimeTTS(GeminiLiveTTS):
     """Play native audio produced by the GPT Realtime turn."""
 
     integration_name = "GPT Realtime"
+
+
+class QwenRealtimeTTS(GeminiLiveTTS):
+    """Play the native 24 kHz Qwen audio using the shared TTS handoff."""
+
+    integration_name = "Qwen Realtime"
+
+    supported_language_codes = QWEN_SUPPORTED_LANGUAGES

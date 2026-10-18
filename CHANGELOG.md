@@ -4,6 +4,11 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Added QwenCloud Omni Realtime as a provider for voice and typed conversations,
+  streaming audio, Home Assistant function calling, and barge-in. Supports
+  Qwen3.8 Omni Flash and Qwen3.5 Omni Plus/Flash Realtime, including the documented
+  2026-03-15 snapshots. Models without function calling are excluded.
+
 - Added actionable API quota errors and Repairs issues for voice and typed
   conversations, with links to check Google AI limits, usage, and billing.
   Generic quota errors no longer imply that billing credit is exhausted, and

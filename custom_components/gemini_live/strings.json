@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Choose a live model provider",
-        "description": "Use either Google Gemini Live or OpenAI GPT Realtime with the Home Assistant voice pipeline.",
+        "description": "Choose Google Gemini Live, OpenAI GPT Realtime, or QwenCloud Omni Realtime for the Home Assistant voice pipeline.",
         "data": {
           "provider": "Provider"
         }
@@ -27,7 +27,8 @@
           "support_barge_in": "Support barge-in",
           "response_timeout": "Response inactivity timeout",
           "affective_dialog": "Affective dialog",
-          "llm_hass_api": "LLM APIs"
+          "llm_hass_api": "LLM APIs",
+          "transcribe_qwen": "Transcribe Qwen"
         },
         "data_description": {
           "api_key": "Audio, text, Home Assistant tool schemas, and tool results are sent to the selected provider.",
@@ -44,7 +45,8 @@
           "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage.",
           "response_timeout": "Seconds without any provider response activity before the live session is discarded. Increase this for slow models or long-running tool calls. This does not change Home Assistant's external-VAD listening timeout.",
           "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 2.5 Flash Native Audio Preview (12-2025).",
-          "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use. Select Assist for smart-home control and Memory Management for long-term memory."
+          "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use. Select Assist for smart-home control and Memory Management for long-term memory.",
+          "transcribe_qwen": "Stream the spoken-response transcript from Qwen into Home Assistant."
         }
       },
       "reconfigure": {
@@ -65,7 +67,8 @@
           "support_barge_in": "Support barge-in",
           "response_timeout": "Response inactivity timeout",
           "affective_dialog": "Affective dialog",
-          "llm_hass_api": "LLM APIs"
+          "llm_hass_api": "LLM APIs",
+          "transcribe_qwen": "Transcribe Qwen"
         },
         "data_description": {
           "model": "After a model change, the form may refresh once to show only settings supported by that model.",
@@ -75,7 +78,8 @@
           "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage.",
           "response_timeout": "Seconds without any provider response activity before the live session is discarded. Increase this for slow models or long-running tool calls. This does not change Home Assistant's external-VAD listening timeout.",
           "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 2.5 Flash Native Audio Preview (12-2025).",
-          "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use."
+          "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use.",
+          "transcribe_qwen": "Stream the spoken-response transcript from Qwen into Home Assistant."
         }
       }
     },
@@ -103,7 +107,8 @@
           "support_barge_in": "Support barge-in",
           "response_timeout": "Response inactivity timeout",
           "affective_dialog": "Affective dialog",
-          "llm_hass_api": "LLM APIs"
+          "llm_hass_api": "LLM APIs",
+          "transcribe_qwen": "Transcribe Qwen"
         },
         "data_description": {
           "model": "After a model change, the form may refresh once to show only settings supported by that model.",
@@ -113,7 +118,8 @@
           "support_barge_in": "Experimental: keep microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires a full-duplex voice client/satellite that keeps transmitting microphone audio during playback, and may increase realtime audio usage.",
           "response_timeout": "Seconds without any provider response activity before the live session is discarded. Increase this for slow models or long-running tool calls. This does not change Home Assistant's external-VAD listening timeout.",
           "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 2.5 Flash Native Audio Preview (12-2025).",
-          "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use. Select Assist for smart-home control and Memory Management for long-term memory."
+          "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use. Select Assist for smart-home control and Memory Management for long-term memory.",
+          "transcribe_qwen": "Stream the spoken-response transcript from Qwen into Home Assistant."
         }
       }
     }

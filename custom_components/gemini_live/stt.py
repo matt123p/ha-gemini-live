@@ -70,9 +70,13 @@ from .const import (
     OPENAI_SYSTEM_INSTRUCTION,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
+    PROVIDER_QWEN,
+    CONF_TRANSCRIBE_QWEN,
+    QWEN_SUPPORTED_LANGUAGES,
     SUPPORTED_LANGUAGES,
 )
 from .openai import OpenAIRealtimeClient
+from .qwen import QwenRealtimeClient
 from .sounds import (
     PLAY_SOUND_TOOL,
     PLAY_SOUND_TOOL_NAME,
@@ -467,7 +471,7 @@ async def async_setup_entry(
     """Set up the selected realtime provider's STT platform."""
     config = {**config_entry.data, **config_entry.options}
     provider = config.get(CONF_PROVIDER, PROVIDER_GEMINI)
-    entity_class = GPTRealtimeSTT if provider == PROVIDER_OPENAI else GeminiLiveSTT
+    entity_class = {PROVIDER_OPENAI: GPTRealtimeSTT, PROVIDER_QWEN: QwenRealtimeSTT}.get(provider, GeminiLiveSTT)
     async_add_entities([entity_class(config_entry)])
 
 
@@ -1654,3 +1658,16 @@ class GPTRealtimeSTT(LiveModelSTT):
     def _api_error_message(exc: BaseException) -> str | None:
         """Return OpenAI billing errors that the user can resolve."""
         return _user_visible_api_error(exc)
+
+
+class QwenRealtimeSTT(LiveModelSTT):
+    """Stream native PCM audio through QwenCloud Omni Realtime."""
+
+    integration_name = "Qwen Realtime"
+    transcribe_config_key = CONF_TRANSCRIBE_QWEN
+    default_transcribe = False
+
+    supported_language_codes = QWEN_SUPPORTED_LANGUAGES
+
+    async def _async_create_client(self, api_key: str) -> QwenRealtimeClient:
+        return QwenRealtimeClient(async_get_clientsession(self.hass), api_key)

@@ -1,11 +1,11 @@
-# Gemini Live and GPT Realtime for Home Assistant
+# Gemini Live, GPT Realtime, and Qwen Realtime for Home Assistant
 
 [![HACS validation](https://img.shields.io/github/actions/workflow/status/matt123p/ha-gemini-live/validate.yml?branch=main&label=HACS%20validation)](https://github.com/matt123p/ha-gemini-live/actions/workflows/validate.yml)
 [![GitHub release](https://img.shields.io/github/v/release/matt123p/ha-gemini-live)](https://github.com/matt123p/ha-gemini-live/releases)
 [![License](https://img.shields.io/github/license/matt123p/ha-gemini-live)](LICENSE)
 
 This custom Home Assistant integration connects the Home Assistant voice pipeline
-directly to either Google's Gemini Live API or OpenAI's Realtime API.
+directly to Google Gemini Live, OpenAI Realtime, or QwenCloud Omni Realtime.
 
 Doing this has the advantage of reducing the time it takes to reply because the 
 Speech-to-text and the Text-to-speech are done natively by the Live model.
@@ -35,7 +35,7 @@ A normal Assist pipeline has three separate stages:
 The integration deliberately bends that arrangement:
 
 1. The selected live STT entity doesn't perform Speech-to-text but instead streams
-   the microphone audio to Gemini or OpenAI.
+   the microphone audio to the selected realtime provider.
 2. In the same live turn, the model transcribes the user, calls any required Home
    Assistant Assist tools, and starts producing native audio.
 3. The conversation entity passes a provider-specific, per-turn placeholder through
@@ -54,9 +54,39 @@ conversation sessions after its configured chat-session timeout, at which point
 the matching Live connection is closed.
 
 The shared pipeline talks to a provider-neutral live session contract. Google
-Gemini SDK details live in `gemini.py`, while OpenAI Realtime WebSocket details
-live in `openai.py`; neither provider's event or configuration format leaks into
+Gemini SDK details live in `gemini.py`, OpenAI WebSocket details in `openai.py`,
+and QwenCloud WebSocket details in `qwen.py`. Provider protocol details stay outside
 the shared STT, conversation, or session-manager code.
+
+## QwenCloud setup
+
+Choose **QwenCloud** when adding the integration, supply a
+[QwenCloud API key](https://www.qwencloud.com/), and select a realtime model.
+The Qwen provider supports only models with documented function calling:
+
+- `qwen3.8-omni-flash-realtime` (default)
+- `qwen3.5-omni-plus-realtime`
+- `qwen3.5-omni-flash-realtime`
+- The `2026-03-15` snapshots of the two Qwen3.5 models
+
+Older Omni Turbo and Qwen3 Omni Flash Realtime models are excluded because they
+do not support function calling. See the [model capability table](https://docs.qwencloud.com/developer-guides/speech/s2s-models).
+Select the matching **Qwen Realtime** STT, conversation, and TTS entities in your
+Assist pipeline. These share the existing audio handoff and conversation-session
+lifecycle. Typed conversations, Assist function calls, optional response
+transcripts, and experimental barge-in use the same pipeline as the other providers.
+
+The adapter connects to
+`wss://maas.qwencloudapi.com/api-ws/v1/realtime` using Bearer authentication and
+the configured model. Audio input is raw 16 kHz mono PCM16; native output is
+24 kHz PCM16. Qwen3.8 uses nested audio settings, while Qwen3.5 uses its documented
+flat audio fields. No additional SDK is required; the adapter uses Home
+Assistant's existing aiohttp session. [Protocol reference](https://docs.qwencloud.com/api-reference/real-time-multimodal/client-events).
+
+Only Home Assistant function tools are exposed. Qwen's native web search and
+hosted MCP tools are not enabled. The Google-specific grounding, thinking, and
+affective-dialog settings are hidden for Qwen. As with other cloud providers,
+microphone audio, typed messages, tool schemas, and tool results are sent to Qwen.
 
 ## Difference From The Official Gemini Integration
 

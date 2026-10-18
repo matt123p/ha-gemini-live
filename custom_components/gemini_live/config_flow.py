@@ -49,6 +49,12 @@ from .const import (
     PERSONAPLEX_DEFAULT_VOICE,
     MAX_RESPONSE_TIMEOUT,
     MIN_RESPONSE_TIMEOUT,
+    PROVIDER_QWEN,
+    QWEN_AVAILABLE_MODELS,
+    QWEN_DEFAULT_MODEL,
+    CONF_TRANSCRIBE_QWEN,
+    QWEN_AVAILABLE_VOICES,
+    QWEN_DEFAULT_VOICE,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
     PROVIDER_PERSONAPLEX,
@@ -62,6 +68,7 @@ PROVIDER_SELECTOR = selector.SelectSelector(
         options=[
             selector.SelectOptionDict(value=PROVIDER_GEMINI, label="Google Gemini"),
             selector.SelectOptionDict(value=PROVIDER_OPENAI, label="OpenAI"),
+            selector.SelectOptionDict(value=PROVIDER_QWEN, label="QwenCloud"),
             selector.SelectOptionDict(
                 value=PROVIDER_PERSONAPLEX, label="fal.ai PersonaPlex"
             ),
@@ -127,17 +134,22 @@ def _provider_schema(
 ) -> vol.Schema:
     """Build a provider-specific setup/options schema."""
     current = config or {}
+    is_qwen = provider == PROVIDER_QWEN
     is_openai = provider == PROVIDER_OPENAI
     is_personaplex = provider == PROVIDER_PERSONAPLEX
     models = (
-        PERSONAPLEX_AVAILABLE_MODELS
+        QWEN_AVAILABLE_MODELS
+        if is_qwen
+        else PERSONAPLEX_AVAILABLE_MODELS
         if is_personaplex
         else OPENAI_AVAILABLE_MODELS
         if is_openai
         else AVAILABLE_MODELS
     )
     default_model = (
-        PERSONAPLEX_DEFAULT_MODEL
+        QWEN_DEFAULT_MODEL
+        if is_qwen
+        else PERSONAPLEX_DEFAULT_MODEL
         if is_personaplex
         else OPENAI_DEFAULT_MODEL
         if is_openai
@@ -157,7 +169,16 @@ def _provider_schema(
         if is_openai
         else GEMINI_VOICE_SELECTOR
     )
-    transcribe_key = CONF_TRANSCRIBE_GPT if is_openai else CONF_TRANSCRIBE_GEMINI
+    if is_qwen:
+        default_voice = QWEN_DEFAULT_VOICE
+        voice_selector = _model_selector(QWEN_AVAILABLE_VOICES)
+    transcribe_key = (
+        CONF_TRANSCRIBE_QWEN
+        if is_qwen
+        else CONF_TRANSCRIBE_GPT
+        if is_openai
+        else CONF_TRANSCRIBE_GEMINI
+    )
     default_transcribe = (
         DEFAULT_TRANSCRIBE_GPT if is_openai else DEFAULT_TRANSCRIBE_GEMINI
     )
@@ -230,7 +251,7 @@ def _provider_schema(
         ] = selector.SelectSelector(
             selector.SelectSelectorConfig(options=apis, multiple=True)
         )
-    if not is_openai and not is_personaplex:
+    if provider == PROVIDER_GEMINI:
         # All Gemini Live models offered by this integration support Google's
         # server-side Search grounding tool. It is a separate, opt-in
         # preference from the former Assist search-tool prompt hint.
@@ -270,8 +291,7 @@ def _provider_schema(
     # models that support it; Home Assistant config forms cannot render a
     # disabled field, so it is hidden instead.
     if (
-        not is_openai
-        and not is_personaplex
+        provider == PROVIDER_GEMINI
         and supports_affective_dialog(current.get(CONF_MODEL))
     ):
         fields[
@@ -284,8 +304,7 @@ def _provider_schema(
             )
         ] = selector.BooleanSelector()
     if (
-        not is_openai
-        and not is_personaplex
+        provider == PROVIDER_GEMINI
         and supports_thinking_level(current.get(CONF_MODEL))
     ):
         fields[
@@ -308,6 +327,9 @@ def _strip_unsupported_settings(user_input: dict[str, Any]) -> dict[str, Any]:
         user_input.pop(CONF_THINKING_LEVEL, None)
     if not supports_tts_interruption():
         user_input.pop(CONF_SUPPORT_BARGE_IN, None)
+    if user_input.get(CONF_MODEL) in QWEN_AVAILABLE_MODELS:
+        user_input.pop(CONF_SEARCH_GROUNDING, None)
+        user_input.pop(CONF_ENCOURAGE_WEB_SEARCH, None)
     return user_input
 
 
@@ -320,7 +342,7 @@ def _needs_model_specific_refresh(user_input: dict[str, Any]) -> bool:
 
 
 class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Configure a Gemini Live or GPT Realtime provider."""
+    """Configure a realtime voice provider."""
 
     VERSION = 1
 
@@ -365,6 +387,7 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             user_input.setdefault(CONF_SYSTEM_INSTRUCTION, "")
             title = {
                 PROVIDER_OPENAI: "GPT Realtime",
+                PROVIDER_QWEN: "Qwen Realtime",
                 PROVIDER_PERSONAPLEX: "PersonaPlex",
             }.get(selected_provider, "Gemini Live")
             return self.async_create_entry(title=title, data=user_input)
@@ -374,6 +397,7 @@ class GeminiLiveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "provider": {
                     PROVIDER_OPENAI: "OpenAI",
+                    PROVIDER_QWEN: "QwenCloud",
                     PROVIDER_PERSONAPLEX: "fal.ai PersonaPlex",
                 }.get(selected_provider, "Google Gemini")
             },

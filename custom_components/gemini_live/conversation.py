@@ -45,6 +45,9 @@ from .const import (
     OPENAI_SYSTEM_INSTRUCTION,
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
+    PROVIDER_QWEN,
+    CONF_TRANSCRIBE_QWEN,
+    QWEN_SUPPORTED_LANGUAGES,
     SUPPORTED_LANGUAGES,
 )
 from .stt import (
@@ -60,6 +63,7 @@ from .stt import (
     _validate_tool_results,
 )
 from .openai import OpenAIRealtimeClient
+from .qwen import QwenRealtimeClient
 from .runtime import AudioStream, new_conversation_id
 from .sounds import PLAY_SOUND_TOOL_NAME, async_sound_response
 from .utils import pcm_to_wav, resample_24k_to_16k
@@ -75,11 +79,10 @@ async def async_setup_entry(
     """Set up the selected realtime provider's conversation platform."""
     config = {**config_entry.data, **config_entry.options}
     provider = config.get(CONF_PROVIDER, PROVIDER_GEMINI)
-    entity_class = (
-        GPTRealtimeConversationAgent
-        if provider == PROVIDER_OPENAI
-        else GeminiLiveConversationAgent
-    )
+    entity_class = {
+        PROVIDER_OPENAI: GPTRealtimeConversationAgent,
+        PROVIDER_QWEN: QwenRealtimeConversationAgent,
+    }.get(provider, GeminiLiveConversationAgent)
     async_add_entities([entity_class(hass, config_entry)])
 
 
@@ -637,3 +640,18 @@ class GPTRealtimeConversationAgent(LiveModelConversationAgent):
     async def _async_create_client(self, api_key: str) -> OpenAIRealtimeClient:
         """Create an OpenAI Realtime WebSocket client."""
         return OpenAIRealtimeClient(async_get_clientsession(self.hass), api_key)
+
+
+class QwenRealtimeConversationAgent(LiveModelConversationAgent):
+    """Handle typed and voice-pipeline turns through QwenCloud."""
+
+    integration_name = "Qwen Realtime"
+    conversation_event = "qwen_realtime_conversation_entry"
+    transcribe_config_key = CONF_TRANSCRIBE_QWEN
+    default_transcribe = False
+    error_response = "Sorry, I could not get a response from Qwen Realtime."
+
+    supported_language_codes = QWEN_SUPPORTED_LANGUAGES
+
+    async def _async_create_client(self, api_key: str) -> QwenRealtimeClient:
+        return QwenRealtimeClient(async_get_clientsession(self.hass), api_key)
