@@ -918,3 +918,92 @@ async def test_placeholder_transcript_carries_unique_turn_id(
     assert turn is not None
     assert turn.assistant_text.startswith(GEMINI_LIVE_TTS_PLACEHOLDER)
     assert turn.assistant_text != GEMINI_LIVE_TTS_PLACEHOLDER
+
+
+class NoSpeechSession(ScriptedSession):
+    """A session whose provider reports that the user stayed silent."""
+
+    def __init__(self) -> None:
+        super().__init__(support_barge_in=False)
+
+    async def receive(self):
+        self.reply_started.set()
+        yield LiveEvent(no_speech=True)
+        # A late re-engagement must not be played.
+        yield LiveEvent(audio=AUDIO_A)
+        await asyncio.Event().wait()
+
+
+@pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
+async def test_no_speech_stops_listening_without_waiting_for_external_vad(
+    entity_class,
+) -> None:
+    hass = FakeHass()
+    entry_data = {"api_key": "k", CONF_SUPPORT_BARGE_IN: False}
+    entity, _session_manager, turn_store = _make_entity(hass, entry_data, entity_class)
+    session = NoSpeechSession()
+    _bind_client(entity, ScriptedClient(session))
+
+    mic = MicStream()
+    result_future = asyncio.Future()
+    run_task = asyncio.create_task(
+        entity._async_run_audio_stream_sdk(
+            _metadata(),
+            mic.chunks(),
+            "k",
+            "m",
+            "v",
+            "",
+            False,
+            False,
+            False,
+            result_future,
+            "conversation-1",
+            None,
+        )
+    )
+    mic.put(MIC_CHUNK)
+
+    # The microphone is never closed: Core's VAD would only end it after its
+    # timeout. The empty result ends the run as "no text recognized".
+    result = await asyncio.wait_for(run_task, 5)
+    assert result.result is SpeechResultState.SUCCESS
+    assert result.text is None
+    assert turn_store.take_voice_turn("conversation-1", "anything") is None
+
+
+class LateNoSpeechSession(ScriptedSession):
+    """Reports silence only after the microphone stream has ended."""
+
+    def __init__(self) -> None:
+        super().__init__(support_barge_in=False)
+
+    async def receive(self):
+        self.reply_started.set()
+        await self.release_gate.wait()
+        yield LiveEvent(no_speech=True)
+        await asyncio.Event().wait()
+
+
+@pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
+async def test_no_speech_after_the_microphone_closed_is_not_an_error(entity_class) -> None:
+    hass = FakeHass()
+    entity, _session_manager, _turn_store = _make_entity(
+        hass, {"api_key": "k", CONF_SUPPORT_BARGE_IN: False}, entity_class
+    )
+    session = LateNoSpeechSession()
+    _bind_client(entity, ScriptedClient(session))
+    mic = MicStream()
+    run_task = asyncio.create_task(
+        entity._async_run_audio_stream_sdk(
+            _metadata(), mic.chunks(), "k", "m", "v", "", False, False, False,
+            asyncio.Future(), "conversation-1", None,
+        )
+    )
+    mic.put(MIC_CHUNK)
+    mic.close()
+    await _wait_until(lambda: session.end_audio_count == 1)
+    session.release_gate.set()
+    result = await asyncio.wait_for(run_task, 5)
+    assert result.result is SpeechResultState.SUCCESS and result.text is None
+

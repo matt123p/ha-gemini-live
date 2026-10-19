@@ -882,10 +882,22 @@ class LiveModelSTT(SpeechToTextEntity):
                 nonlocal last_response_activity
                 nonlocal sound_selected
                 nonlocal connection_closed
+                nonlocal no_speech_detected
                 replacement_response_pending = False
                 try:
                     _LOGGER.warning("[turn=%s] receive_responses started", turn_id)
                     async for response in session.receive():
+                        if (
+                            response.no_speech
+                            and not first_audio.is_set()
+                            and not input_transcript_parts
+                        ):
+                            _LOGGER.warning(
+                                "[turn=%s] provider reported no speech; ending the turn",
+                                turn_id,
+                            )
+                            no_speech_detected = True
+                            break
                         if (
                             response.user_activity_started
                             or response.interrupted
@@ -1200,6 +1212,7 @@ class LiveModelSTT(SpeechToTextEntity):
                         )
                     raise
 
+            no_speech_detected = False
             send_task = asyncio.create_task(send_audio())
             receive_task = asyncio.create_task(receive_responses())
             _LOGGER.warning("[turn=%s] created send and receive tasks", turn_id)
@@ -1292,6 +1305,12 @@ class LiveModelSTT(SpeechToTextEntity):
                         )
                         raise
 
+                if receive_task in done and no_speech_detected:
+                    # Stop listening now instead of waiting for Core's VAD
+                    # timeout. An empty result ends the pipeline run as
+                    # "no text recognized", which satellites treat as silence.
+                    publish_task.cancel()
+                    return SpeechResult(None, SpeechResultState.SUCCESS)
                 if receive_task in done:
                     if not send_task.done():
                         if support_barge_in:
@@ -1352,6 +1371,11 @@ class LiveModelSTT(SpeechToTextEntity):
                             )
                         except asyncio.TimeoutError:
                             continue
+                if no_speech_detected:
+                    # The provider may report silence after the microphone
+                    # stream already ended; the result is the same.
+                    publish_task.cancel()
+                    return SpeechResult(None, SpeechResultState.SUCCESS)
                 if first_audio.is_set():
                     await publish_task
                 else:
