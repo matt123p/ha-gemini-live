@@ -59,6 +59,9 @@ class LiveEvent:
     output_transcript: str | None = None
     tool_calls: list[LiveToolCall] = field(default_factory=list)
     turn_complete: bool = False
+    # The provider decided that the user said nothing in this turn, e.g. the
+    # follow-up window of a continued conversation passed in silence.
+    no_speech: bool = False
 
     interrupted: bool = False
     user_activity_started: bool = False

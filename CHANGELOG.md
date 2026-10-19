@@ -4,6 +4,16 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Added ElevenLabs Agents as a provider for voice and typed conversations,
+  with ElevenLabs voices (including your own designed or cloned voices), a
+  selectable agent LLM, streaming audio, and Home Assistant function calling.
+  The integration creates a dedicated agent per config entry, mirrors the
+  selected Home Assistant tools as ElevenLabs client tools, and deletes both
+  when the entry is removed. Barge-in is not offered for this provider yet.
+- Added a provider-neutral `no_speech` live event. When a provider reports that
+  the user stayed silent, the voice turn stops listening right away and ends as
+  "no text recognized" instead of waiting for Core's 15-second VAD timeout.
+
 - Added QwenCloud Omni Realtime as a provider for voice and typed conversations,
   streaming audio, Home Assistant function calling, and barge-in. Supports
   Qwen3.8 Omni Flash and Qwen3.5 Omni Plus/Flash Realtime, including the documented

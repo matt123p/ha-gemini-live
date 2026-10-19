@@ -71,12 +71,20 @@ from .const import (
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
     PROVIDER_QWEN,
+    PROVIDER_ELEVENLABS,
+    CONF_ELEVENLABS_AGENT_ID,
+    CONF_TRANSCRIBE_ELEVENLABS,
+    ELEVENLABS_CACHE_KEY,
+    ELEVENLABS_CACHE_SAVE_KEY,
+    ELEVENLABS_SUPPORTED_LANGUAGES,
+    ELEVENLABS_SYSTEM_INSTRUCTION,
     CONF_TRANSCRIBE_QWEN,
     QWEN_SUPPORTED_LANGUAGES,
     SUPPORTED_LANGUAGES,
 )
 from .openai import OpenAIRealtimeClient
 from .qwen import QwenRealtimeClient
+from .elevenlabs import ElevenLabsAgentsClient
 from .sounds import (
     PLAY_SOUND_TOOL,
     PLAY_SOUND_TOOL_NAME,
@@ -471,7 +479,11 @@ async def async_setup_entry(
     """Set up the selected realtime provider's STT platform."""
     config = {**config_entry.data, **config_entry.options}
     provider = config.get(CONF_PROVIDER, PROVIDER_GEMINI)
-    entity_class = {PROVIDER_OPENAI: GPTRealtimeSTT, PROVIDER_QWEN: QwenRealtimeSTT}.get(provider, GeminiLiveSTT)
+    entity_class = {
+        PROVIDER_OPENAI: GPTRealtimeSTT,
+        PROVIDER_QWEN: QwenRealtimeSTT,
+        PROVIDER_ELEVENLABS: ElevenLabsAgentsSTT,
+    }.get(provider, GeminiLiveSTT)
     async_add_entities([entity_class(config_entry)])
 
 
@@ -882,10 +894,22 @@ class LiveModelSTT(SpeechToTextEntity):
                 nonlocal last_response_activity
                 nonlocal sound_selected
                 nonlocal connection_closed
+                nonlocal no_speech_detected
                 replacement_response_pending = False
                 try:
                     _LOGGER.warning("[turn=%s] receive_responses started", turn_id)
                     async for response in session.receive():
+                        if (
+                            response.no_speech
+                            and not first_audio.is_set()
+                            and not input_transcript_parts
+                        ):
+                            _LOGGER.warning(
+                                "[turn=%s] provider reported no speech; ending the turn",
+                                turn_id,
+                            )
+                            no_speech_detected = True
+                            break
                         if (
                             response.user_activity_started
                             or response.interrupted
@@ -1200,6 +1224,7 @@ class LiveModelSTT(SpeechToTextEntity):
                         )
                     raise
 
+            no_speech_detected = False
             send_task = asyncio.create_task(send_audio())
             receive_task = asyncio.create_task(receive_responses())
             _LOGGER.warning("[turn=%s] created send and receive tasks", turn_id)
@@ -1292,6 +1317,12 @@ class LiveModelSTT(SpeechToTextEntity):
                         )
                         raise
 
+                if receive_task in done and no_speech_detected:
+                    # Stop listening now instead of waiting for Core's VAD
+                    # timeout. An empty result ends the pipeline run as
+                    # "no text recognized", which satellites treat as silence.
+                    publish_task.cancel()
+                    return SpeechResult(None, SpeechResultState.SUCCESS)
                 if receive_task in done:
                     if not send_task.done():
                         if support_barge_in:
@@ -1352,6 +1383,11 @@ class LiveModelSTT(SpeechToTextEntity):
                             )
                         except asyncio.TimeoutError:
                             continue
+                if no_speech_detected:
+                    # The provider may report silence after the microphone
+                    # stream already ended; the result is the same.
+                    publish_task.cancel()
+                    return SpeechResult(None, SpeechResultState.SUCCESS)
                 if first_audio.is_set():
                     await publish_task
                 else:
@@ -1671,3 +1707,24 @@ class QwenRealtimeSTT(LiveModelSTT):
 
     async def _async_create_client(self, api_key: str) -> QwenRealtimeClient:
         return QwenRealtimeClient(async_get_clientsession(self.hass), api_key)
+
+
+class ElevenLabsAgentsSTT(LiveModelSTT):
+    """Stream native PCM audio through an ElevenLabs agent."""
+
+    integration_name = "ElevenLabs Agents"
+    transcribe_config_key = CONF_TRANSCRIBE_ELEVENLABS
+    default_transcribe = False
+    default_system_instruction = ELEVENLABS_SYSTEM_INSTRUCTION
+
+    supported_language_codes = ELEVENLABS_SUPPORTED_LANGUAGES
+
+    async def _async_create_client(self, api_key: str) -> ElevenLabsAgentsClient:
+        entry_data = self.hass.data[self.integration_domain][self.entry.entry_id]
+        return ElevenLabsAgentsClient(
+            async_get_clientsession(self.hass),
+            api_key,
+            entry_data[CONF_ELEVENLABS_AGENT_ID],
+            entry_data[ELEVENLABS_CACHE_KEY],
+            entry_data[ELEVENLABS_CACHE_SAVE_KEY],
+        )
