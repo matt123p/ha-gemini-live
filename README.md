@@ -1,11 +1,12 @@
-# Gemini Live, GPT Realtime, and Qwen Realtime for Home Assistant
+# Gemini Live, GPT Realtime, Qwen Realtime, and ElevenLabs Agents for Home Assistant
 
 [![HACS validation](https://img.shields.io/github/actions/workflow/status/matt123p/ha-gemini-live/validate.yml?branch=main&label=HACS%20validation)](https://github.com/matt123p/ha-gemini-live/actions/workflows/validate.yml)
 [![GitHub release](https://img.shields.io/github/v/release/matt123p/ha-gemini-live)](https://github.com/matt123p/ha-gemini-live/releases)
 [![License](https://img.shields.io/github/license/matt123p/ha-gemini-live)](LICENSE)
 
 This custom Home Assistant integration connects the Home Assistant voice pipeline
-directly to Google Gemini Live, OpenAI Realtime, or QwenCloud Omni Realtime.
+directly to Google Gemini Live, OpenAI Realtime, QwenCloud Omni Realtime, or
+ElevenLabs Agents.
 
 Doing this has the advantage of reducing the time it takes to reply because the 
 Speech-to-text and the Text-to-speech are done natively by the Live model.
@@ -55,7 +56,8 @@ the matching Live connection is closed.
 
 The shared pipeline talks to a provider-neutral live session contract. Google
 Gemini SDK details live in `gemini.py`, OpenAI WebSocket details in `openai.py`,
-and QwenCloud WebSocket details in `qwen.py`. Provider protocol details stay outside
+QwenCloud WebSocket details in `qwen.py`, and ElevenLabs Agents details in
+`elevenlabs.py`. Provider protocol details stay outside
 the shared STT, conversation, or session-manager code.
 
 ## QwenCloud setup
@@ -87,6 +89,60 @@ Only Home Assistant function tools are exposed. Qwen's native web search and
 hosted MCP tools are not enabled. The Google-specific grounding, thinking, and
 affective-dialog settings are hidden for Qwen. As with other cloud providers,
 microphone audio, typed messages, tool schemas, and tool results are sent to Qwen.
+
+## ElevenLabs Agents setup
+
+Choose **ElevenLabs Agents** to answer with an ElevenLabs voice, including
+voices you designed or cloned in your ElevenLabs account. Unlike the other
+providers, ElevenLabs Agents is not a single speech-to-speech model: ElevenLabs
+transcribes the user, asks the LLM you select, and synthesizes the reply,
+all inside one streaming session. That is why the **Live model** setting picks
+the agent's LLM rather than an audio model.
+
+1. Create an [ElevenLabs API key](https://elevenlabs.io/app/settings/api-keys)
+   with access to ElevenLabs Agents.
+2. Add the integration, choose **ElevenLabs Agents**, enter the key, and select
+   an LLM. The offered models, led by the inexpensive default
+   `gemini-3.1-flash-lite`, started speaking about two seconds after a
+   tool-calling smart-home request in testing; any other LLM ID from the
+   [ElevenLabs Agents documentation](https://elevenlabs.io/docs/eleven-agents/customization/llm)
+   can be typed in.
+3. Submit once. The integration checks the key and shows your account's
+   voices; pick one and submit again.
+4. Select the matching **ElevenLabs Agents** STT, conversation, and TTS entities
+   in your Assist pipeline.
+
+The integration manages these objects in your ElevenLabs account:
+
+- **One agent per config entry**, named `Home Assistant (<entry title>)`. It
+  fixes the audio formats (16 kHz PCM in, 24 kHz PCM out), the turn timing, and
+  the agent language, which follows Home Assistant's language. These settings
+  are reapplied whenever the entry is set up, so updates of this integration
+  reach existing agents. The system instruction, LLM, voice, and the turn's
+  tools are sent with each conversation, so changing them in Home Assistant
+  needs no dashboard edits. Reconfiguring the entry repairs the agent, or
+  creates a new one if it was deleted.
+- **One client tool per Home Assistant tool.** ElevenLabs only lets an agent call
+  tools that are attached to it, so the Assist tools are mirrored as client
+  tools and attached to the agent; each conversation selects the ones of its
+  own turn. They are only created or updated when Home Assistant's tool
+  definitions change, for example after exposing a script, and are attached
+  again if they were removed from the agent in the dashboard. Home Assistant
+  still executes every call.
+
+Removing the config entry deletes the agent and its tools. ElevenLabs bills
+agent conversations per connected minute, plus the LLM it uses; see
+[ElevenLabs pricing](https://elevenlabs.io/pricing). To avoid paying for idle
+connections, a session is closed 20 seconds after a reply has finished. A
+follow-up within that time keeps the conversation's context; a later question
+starts a new ElevenLabs conversation. Barge-in is not offered for
+this provider yet. Expressive voice models speak audio tags such as `[happy]`
+as emotion; the tags are removed from response transcripts.
+
+When a continued conversation gets no answer, ElevenLabs takes the silent turn
+after 4 seconds (8 seconds right after the wake word) and would ask whether
+you are still there. The integration drops that question and ends the
+pipeline run as "no text recognized", which voice satellites treat as silence.
 
 ## Difference From The Official Gemini Integration
 

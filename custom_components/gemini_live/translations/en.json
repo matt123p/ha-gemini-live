@@ -28,12 +28,13 @@
           "response_timeout": "Response inactivity timeout",
           "affective_dialog": "Affective dialog",
           "llm_hass_api": "LLM APIs",
-          "transcribe_qwen": "Transcribe Qwen"
+          "transcribe_qwen": "Transcribe Qwen",
+          "transcribe_elevenlabs": "Transcribe ElevenLabs"
         },
         "data_description": {
           "api_key": "Audio, text, Home Assistant tool schemas, and tool results are sent to the selected provider.",
-          "model": "Realtime audio model used for voice and typed conversations. After a model change, the form may refresh once to show only settings supported by that model.",
-          "voice": "Built-in voice used for spoken replies.",
+          "model": "Realtime audio model used for voice and typed conversations. After a model change, the form may refresh once to show only settings supported by that model. For ElevenLabs Agents, this is the LLM the agent uses; any model ID from the ElevenLabs Agents documentation can be entered.",
+          "voice": "Built-in voice used for spoken replies. For ElevenLabs Agents, your account's voices are listed after the API key has been checked.",
           "system_instruction": "Optional custom personality and behavior. Home Assistant's Assist tool instructions are appended automatically.",
           "detailed_logging": "Write transcripts, model details, and tool calls to the Home Assistant log. Enable only while troubleshooting.",
           "transcribe_gemini": "Stream Gemini's spoken-response transcript into Home Assistant. Disabling this gives the lowest reply-audio latency.",
@@ -46,7 +47,8 @@
           "response_timeout": "Seconds without any provider response activity before the live session is discarded. Increase this for slow models or long-running tool calls. This does not change Home Assistant's external-VAD listening timeout.",
           "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 2.5 Flash Native Audio Preview (12-2025).",
           "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use. Select Assist for smart-home control and Memory Management for long-term memory.",
-          "transcribe_qwen": "Stream the spoken-response transcript from Qwen into Home Assistant."
+          "transcribe_qwen": "Stream the spoken-response transcript from Qwen into Home Assistant.",
+          "transcribe_elevenlabs": "Stream the ElevenLabs agent's response text into Home Assistant. Disabling this gives the lowest reply-audio latency."
         }
       },
       "reconfigure": {
@@ -68,10 +70,11 @@
           "response_timeout": "Response inactivity timeout",
           "affective_dialog": "Affective dialog",
           "llm_hass_api": "LLM APIs",
-          "transcribe_qwen": "Transcribe Qwen"
+          "transcribe_qwen": "Transcribe Qwen",
+          "transcribe_elevenlabs": "Transcribe ElevenLabs"
         },
         "data_description": {
-          "model": "After a model change, the form may refresh once to show only settings supported by that model.",
+          "model": "After a model change, the form may refresh once to show only settings supported by that model. For ElevenLabs Agents, this is the LLM the agent uses; any model ID from the ElevenLabs Agents documentation can be entered.",
           "search_grounding": "Allow Gemini to use Google's built-in Search tool for current and verifiable web information. Search queries may incur additional Gemini API charges.",
           "enable_sound_responses": "Allow the model to play short beep cues instead of speaking for simple acknowledgements and action results. Disabled by default.",
           "thinking_level": "Controls how much background reasoning Gemini 3.8 Live Extended Thinking uses. Higher levels can improve complex answers but may increase latency and cost.",
@@ -79,12 +82,17 @@
           "response_timeout": "Seconds without any provider response activity before the live session is discarded. Increase this for slow models or long-running tool calls. This does not change Home Assistant's external-VAD listening timeout.",
           "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 2.5 Flash Native Audio Preview (12-2025).",
           "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use.",
-          "transcribe_qwen": "Stream the spoken-response transcript from Qwen into Home Assistant."
+          "transcribe_qwen": "Stream the spoken-response transcript from Qwen into Home Assistant.",
+          "transcribe_elevenlabs": "Stream the ElevenLabs agent's response text into Home Assistant. Disabling this gives the lowest reply-audio latency."
         }
       }
     },
     "abort": {
       "reconfigure_successful": "The live model was reconfigured successfully."
+    },
+    "error": {
+      "invalid_auth": "The API key was not accepted.",
+      "cannot_connect": "Could not create or update the ElevenLabs agent. Check the log for details."
     }
   },
   "options": {
@@ -108,10 +116,11 @@
           "response_timeout": "Response inactivity timeout",
           "affective_dialog": "Affective dialog",
           "llm_hass_api": "LLM APIs",
-          "transcribe_qwen": "Transcribe Qwen"
+          "transcribe_qwen": "Transcribe Qwen",
+          "transcribe_elevenlabs": "Transcribe ElevenLabs"
         },
         "data_description": {
-          "model": "After a model change, the form may refresh once to show only settings supported by that model.",
+          "model": "After a model change, the form may refresh once to show only settings supported by that model. For ElevenLabs Agents, this is the LLM the agent uses; any model ID from the ElevenLabs Agents documentation can be entered.",
           "search_grounding": "Allow Gemini to use Google's built-in Search tool for current and verifiable web information. Search queries may incur additional Gemini API charges.",
           "enable_sound_responses": "Allow the model to play short beep cues instead of speaking for simple acknowledgements and action results. Disabled by default.",
           "thinking_level": "Controls how much background reasoning Gemini 3.8 Live Extended Thinking uses. Higher levels can improve complex answers but may increase latency and cost.",
@@ -119,9 +128,14 @@
           "response_timeout": "Seconds without any provider response activity before the live session is discarded. Increase this for slow models or long-running tool calls. This does not change Home Assistant's external-VAD listening timeout.",
           "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 2.5 Flash Native Audio Preview (12-2025).",
           "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use. Select Assist for smart-home control and Memory Management for long-term memory.",
-          "transcribe_qwen": "Stream the spoken-response transcript from Qwen into Home Assistant."
+          "transcribe_qwen": "Stream the spoken-response transcript from Qwen into Home Assistant.",
+          "transcribe_elevenlabs": "Stream the ElevenLabs agent's response text into Home Assistant. Disabling this gives the lowest reply-audio latency."
         }
       }
+    },
+    "error": {
+      "invalid_auth": "The API key was not accepted.",
+      "cannot_connect": "Could not create or update the ElevenLabs agent. Check the log for details."
     }
   },
   "issues": {

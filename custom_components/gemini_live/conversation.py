@@ -46,6 +46,13 @@ from .const import (
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
     PROVIDER_QWEN,
+    PROVIDER_ELEVENLABS,
+    CONF_ELEVENLABS_AGENT_ID,
+    CONF_TRANSCRIBE_ELEVENLABS,
+    ELEVENLABS_CACHE_KEY,
+    ELEVENLABS_CACHE_SAVE_KEY,
+    ELEVENLABS_SUPPORTED_LANGUAGES,
+    ELEVENLABS_SYSTEM_INSTRUCTION,
     CONF_TRANSCRIBE_QWEN,
     QWEN_SUPPORTED_LANGUAGES,
     SUPPORTED_LANGUAGES,
@@ -64,6 +71,7 @@ from .stt import (
 )
 from .openai import OpenAIRealtimeClient
 from .qwen import QwenRealtimeClient
+from .elevenlabs import ElevenLabsAgentsClient
 from .runtime import AudioStream, new_conversation_id
 from .sounds import PLAY_SOUND_TOOL_NAME, async_sound_response
 from .utils import pcm_to_wav, resample_24k_to_16k
@@ -82,6 +90,7 @@ async def async_setup_entry(
     entity_class = {
         PROVIDER_OPENAI: GPTRealtimeConversationAgent,
         PROVIDER_QWEN: QwenRealtimeConversationAgent,
+        PROVIDER_ELEVENLABS: ElevenLabsAgentsConversationAgent,
     }.get(provider, GeminiLiveConversationAgent)
     async_add_entities([entity_class(hass, config_entry)])
 
@@ -655,3 +664,26 @@ class QwenRealtimeConversationAgent(LiveModelConversationAgent):
 
     async def _async_create_client(self, api_key: str) -> QwenRealtimeClient:
         return QwenRealtimeClient(async_get_clientsession(self.hass), api_key)
+
+
+class ElevenLabsAgentsConversationAgent(LiveModelConversationAgent):
+    """Handle typed and voice-pipeline turns through an ElevenLabs agent."""
+
+    integration_name = "ElevenLabs Agents"
+    conversation_event = "elevenlabs_agents_conversation_entry"
+    transcribe_config_key = CONF_TRANSCRIBE_ELEVENLABS
+    default_transcribe = False
+    default_system_instruction = ELEVENLABS_SYSTEM_INSTRUCTION
+    error_response = "Sorry, I could not get a response from ElevenLabs Agents."
+
+    supported_language_codes = ELEVENLABS_SUPPORTED_LANGUAGES
+
+    async def _async_create_client(self, api_key: str) -> ElevenLabsAgentsClient:
+        entry_data = self.hass.data[self.integration_domain][self.entry.entry_id]
+        return ElevenLabsAgentsClient(
+            async_get_clientsession(self.hass),
+            api_key,
+            entry_data[CONF_ELEVENLABS_AGENT_ID],
+            entry_data[ELEVENLABS_CACHE_KEY],
+            entry_data[ELEVENLABS_CACHE_SAVE_KEY],
+        )

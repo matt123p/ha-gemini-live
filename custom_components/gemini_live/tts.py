@@ -31,6 +31,8 @@ from .const import (
     PROVIDER_GEMINI,
     PROVIDER_OPENAI,
     PROVIDER_QWEN,
+    PROVIDER_ELEVENLABS,
+    ELEVENLABS_SUPPORTED_LANGUAGES,
     CONF_MODEL,
     QWEN_SUPPORTED_LANGUAGES,
     SUPPORTED_LANGUAGES,
@@ -49,7 +51,11 @@ async def async_setup_entry(
     """Set up Gemini Live TTS platform."""
     config = {**config_entry.data, **config_entry.options}
     provider = config.get(CONF_PROVIDER, PROVIDER_GEMINI)
-    entity_class = {PROVIDER_OPENAI: GPTRealtimeTTS, PROVIDER_QWEN: QwenRealtimeTTS}.get(provider, GeminiLiveTTS)
+    entity_class = {
+        PROVIDER_OPENAI: GPTRealtimeTTS,
+        PROVIDER_QWEN: QwenRealtimeTTS,
+        PROVIDER_ELEVENLABS: ElevenLabsAgentsTTS,
+    }.get(provider, GeminiLiveTTS)
     async_add_entities([entity_class(config_entry)])
 
 
@@ -236,3 +242,11 @@ class QwenRealtimeTTS(GeminiLiveTTS):
     integration_name = "Qwen Realtime"
 
     supported_language_codes = QWEN_SUPPORTED_LANGUAGES
+
+
+class ElevenLabsAgentsTTS(GeminiLiveTTS):
+    """Play the ElevenLabs agent's 24 kHz voice using the shared TTS handoff."""
+
+    integration_name = "ElevenLabs Agents"
+
+    supported_language_codes = ELEVENLABS_SUPPORTED_LANGUAGES

@@ -56,6 +56,28 @@ QWEN_AVAILABLE_VOICES = [
 ]
 
 
+PROVIDER_ELEVENLABS = "elevenlabs"
+CONF_TRANSCRIBE_ELEVENLABS = "transcribe_elevenlabs"
+CONF_ELEVENLABS_AGENT_ID = "elevenlabs_agent_id"
+# The agent's LLM. ElevenLabs offers many more; these answered tool-calling
+# smart-home turns in about two seconds in testing. Any other model ID from
+# the ElevenLabs Agents documentation can be entered as a custom value.
+ELEVENLABS_DEFAULT_MODEL = "gemini-3.1-flash-lite"
+ELEVENLABS_AVAILABLE_MODELS = [
+    ELEVENLABS_DEFAULT_MODEL,
+    "claude-haiku-4-5",
+    "gpt-4.1-mini",
+]
+# "Jessica", a premade multilingual voice available to every account.
+ELEVENLABS_DEFAULT_VOICE = "cgSgspJ2msm6clMCkdW9"
+# Languages of ElevenLabs' multilingual conversational TTS models.
+ELEVENLABS_SUPPORTED_LANGUAGES = [
+    "ar", "bg", "cs", "da", "de", "el", "en", "en-US", "es", "fi", "fil", "fr",
+    "hi", "hr", "hu", "id", "it", "ja", "ko", "ms", "nl", "no", "pl", "pt",
+    "ro", "ru", "sk", "sv", "ta", "tr", "uk", "vi", "zh",
+]
+
+
 def qwen_supports_tools(model: str | None) -> bool:
     """Only expose documented, function-calling Omni Realtime models."""
     return model in QWEN_AVAILABLE_MODELS
@@ -76,6 +98,13 @@ OPENAI_SYSTEM_INSTRUCTION = (
     "Include necessary context, clarification, or a brief follow-up question, but "
     "avoid unnecessary background, repetition, and conversational filler. Give "
     "more detail when the user asks for it or when the task genuinely needs it."
+)
+
+ELEVENLABS_SYSTEM_INSTRUCTION = (
+    f"{DEFAULT_SYSTEM_INSTRUCTION}\n\n"
+    "Answer the request and stop. Do not end replies by offering further help "
+    "or asking whether there is anything else, and do not ask follow-up "
+    "questions unless you need information to complete the request."
 )
 
 AVAILABLE_MODELS = [
@@ -275,3 +304,6 @@ AVAILABLE_VOICES: list[str] = list(
 # Runtime objects stored under hass.data[DOMAIN][config_entry_id].
 GEMINI_SESSION_MANAGER_KEY = "session_manager"
 GEMINI_TURN_STORE_KEY = "turn_store"
+ELEVENLABS_CACHE_KEY = "elevenlabs_cache"
+ELEVENLABS_CACHE_SAVE_KEY = "elevenlabs_cache_save"
+ELEVENLABS_CACHE_STORE_KEY = "elevenlabs_cache_store"
