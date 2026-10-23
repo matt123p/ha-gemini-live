@@ -16,6 +16,8 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 - Fixed normal WebSocket closures wrapped by the Google SDK being logged as
   unexpected errors. Preserve any usable response, retire closed sessions, and
   handle typed-conversation connection failures before a session is available.
+- Close wake-word turns silently when the live model recognizes no speech,
+  instead of surfacing a speech-to-text error on the remote satellite.
 - Simplified `play_sound` to a tool with no arguments that plays only the `done`
   cue. Removed the other sound assets and choices from the API.
 - Successful sound responses now end both voice and typed conversations, just

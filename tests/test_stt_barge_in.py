@@ -246,6 +246,15 @@ class ScriptedClient:
         return _Connect()
 
 
+class SilentSession(ScriptedSession):
+    """A LiveSession that never recognizes speech or produces a response."""
+
+    async def receive(self):
+        self.reply_started.set()
+        await asyncio.Event().wait()
+        yield LiveEvent()  # pragma: no cover - makes this an async generator
+
+
 def _make_entity(hass: FakeHass, entry_data: dict[str, Any], entity_class):
     entry = SimpleNamespace(
         data=dict(entry_data),
@@ -918,3 +927,54 @@ async def test_placeholder_transcript_carries_unique_turn_id(
     assert turn is not None
     assert turn.assistant_text.startswith(GEMINI_LIVE_TTS_PLACEHOLDER)
     assert turn.assistant_text != GEMINI_LIVE_TTS_PLACEHOLDER
+
+
+@pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
+async def test_unrecognized_speech_closes_pipeline_silently(entity_class) -> None:
+    """A provider turn with no usable content must not surface an STT error."""
+    hass = FakeHass()
+    entity, session_manager, turn_store = _make_entity(
+        hass,
+        {
+            "api_key": "k",
+            CONF_SUPPORT_BARGE_IN: True,
+            CONF_RESPONSE_TIMEOUT: 0.05,
+        },
+        entity_class,
+    )
+    session = SilentSession(support_barge_in=True)
+    client = ScriptedClient(session)
+    _bind_client(entity, client)
+    mic = MicStream()
+    result_future: asyncio.Future = asyncio.Future()
+
+    run_task = asyncio.create_task(
+        entity._async_run_audio_stream_sdk(
+            _metadata(),
+            mic.chunks(),
+            "k",
+            "m",
+            "v",
+            "",
+            True,
+            False,
+            True,
+            result_future,
+            "conversation-1",
+            None,
+        )
+    )
+
+    mic.put(MIC_CHUNK)
+    result = await asyncio.wait_for(run_task, 5)
+
+    assert result.result is SpeechResultState.SUCCESS
+    assert session.sent_audio
+    assert client.close_count == 1
+    assert result.text
+    assert not session_manager.should_continue_conversation("conversation-1")
+    turn = turn_store.take_voice_turn("conversation-1", result.text)
+    assert turn is not None
+    assert turn.assistant_text == ""
+    assert turn.audio == b""
+    assert turn.complete_conversation is True

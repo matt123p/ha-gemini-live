@@ -771,6 +771,31 @@ class LiveModelSTT(SpeechToTextEntity):
         # lookup still matches.
         fallback_user_text = f"{self.tts_placeholder} {turn_id}"
 
+        def silent_success() -> SpeechResult:
+            """Finish an unrecognized turn without surfacing an STT error.
+
+            Home Assistant reports both an STT error result and a successful
+            result without text as a pipeline error. Use the normal voice-turn
+            handoff with empty assistant speech instead: the conversation stage
+            consumes the non-empty internal token, then Core skips TTS and ends
+            the pipeline normally.
+            """
+            session_manager.complete_conversation(conversation_id)
+            turn_store.add_voice_turn(
+                PipelineTurn(
+                    conversation_id=conversation_id,
+                    user_text=fallback_user_text,
+                    assistant_text="",
+                    audio=b"",
+                    complete_conversation=True,
+                )
+            )
+            _LOGGER.info(
+                "[turn=%s] no speech recognized; closing the conversation silently",
+                turn_id,
+            )
+            return SpeechResult(fallback_user_text, SpeechResultState.SUCCESS)
+
         _LOGGER.warning(
             "[turn=%s] acquiring live-model session conversation=%s",
             turn_id,
@@ -1312,7 +1337,7 @@ class LiveModelSTT(SpeechToTextEntity):
                     except asyncio.CancelledError:
                         pass
                     session_manager.retire_session(conversation_id)
-                    return SpeechResult(None, SpeechResultState.ERROR)
+                    return silent_success()
                 elif support_barge_in:
                     # The microphone stream ended: Home Assistant closed it at
                     # the end of the pipeline run, so the provider turn is
@@ -1412,10 +1437,7 @@ class LiveModelSTT(SpeechToTextEntity):
                 SpeechResultState.SUCCESS,
             )
         if not final_text:
-            _LOGGER.error(
-                "STT: Live model returned no usable transcript or response text"
-            )
-            return SpeechResult(None, SpeechResultState.ERROR)
+            return silent_success()
 
         assistant_text = response_text
 
