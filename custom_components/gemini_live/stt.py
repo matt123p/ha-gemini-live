@@ -1338,7 +1338,7 @@ class LiveModelSTT(SpeechToTextEntity):
                         pass
                     session_manager.retire_session(conversation_id)
                     return silent_success()
-                elif support_barge_in:
+                elif support_barge_in and first_audio.is_set():
                     # The microphone stream ended: Home Assistant closed it at
                     # the end of the pipeline run, so the provider turn is
                     # over. Keep listening for the whole run rather than
@@ -1353,6 +1353,11 @@ class LiveModelSTT(SpeechToTextEntity):
                     except asyncio.CancelledError:
                         pass
                 else:
+                    # A closed microphone is not proof that the provider has
+                    # finished responding. In particular, a fresh turn after
+                    # a silence timeout may still be processing its final
+                    # audio. Wait for its first response just as we do without
+                    # barge-in, rather than cancelling it immediately.
                     while not receive_task.done():
                         remaining = response_inactivity_timeout - (
                             time.monotonic() - last_response_activity

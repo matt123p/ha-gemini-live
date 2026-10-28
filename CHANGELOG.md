@@ -18,6 +18,8 @@ All notable changes to Gemini Live for Home Assistant are documented here.
   handle typed-conversation connection failures before a session is available.
 - Close wake-word turns silently when the live model recognizes no speech,
   instead of surfacing a speech-to-text error on the remote satellite.
+- Wait for a pending model response when a barge-in microphone stream closes
+  before any reply audio arrives, including on a new request after silence.
 - Simplified `play_sound` to a tool with no arguments that plays only the `done`
   cue. Removed the other sound assets and choices from the API.
 - Successful sound responses now end both voice and typed conversations, just

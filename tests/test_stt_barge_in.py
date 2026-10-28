@@ -930,6 +930,73 @@ async def test_placeholder_transcript_carries_unique_turn_id(
 
 
 @pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
+@pytest.mark.parametrize("close_silent_mic", [False, True])
+async def test_speech_after_silence_timeout_gets_pending_response(
+    entity_class, close_silent_mic
+) -> None:
+    """A silent turn must release its session and allow a real reply next time."""
+    hass = FakeHass()
+    entity, manager, turns = _make_entity(
+        hass,
+        {
+            "api_key": "k",
+            CONF_SUPPORT_BARGE_IN: True,
+            CONF_RESPONSE_TIMEOUT: 0.05,
+        },
+        entity_class,
+    )
+    silent_client = ScriptedClient(SilentSession(support_barge_in=True))
+    _bind_client(entity, silent_client)
+    silent_mic = MicStream()
+    silent_mic.put(MIC_CHUNK)
+    if close_silent_mic:
+        silent_mic.close()
+
+    async def run(mic):
+        return await entity._async_run_audio_stream_sdk(
+            _metadata(), mic.chunks(), "k", "m", "v", "", True, False,
+            True, asyncio.Future(), "conversation-1", None,
+        )
+
+    silent_result = await asyncio.wait_for(run(silent_mic), 5)
+    silent_turn = turns.take_voice_turn("conversation-1", silent_result.text)
+    assert silent_turn is not None and silent_turn.complete_conversation
+    assert silent_client.close_count == 1
+
+    class ReplyAfterAudioEnd(ScriptedSession):
+        async def end_audio(self):
+            await super().end_audio()
+            self.release_gate.set()
+
+        async def receive(self):
+            # The provider processes the final audio after the sender ends.
+            await self.release_gate.wait()
+            await asyncio.sleep(0.01)
+            yield LiveEvent(input_transcript="What's the time?")
+            yield LiveEvent(audio=AUDIO_A)
+            yield LiveEvent(turn_complete=True)
+
+    reply = ReplyAfterAudioEnd(support_barge_in=True)
+    reply_client = ScriptedClient(reply)
+    _bind_client(entity, reply_client)
+    entity.entry.options[CONF_RESPONSE_TIMEOUT] = 1
+    mic = MicStream()
+    mic.put(MIC_CHUNK)
+    mic.close()
+    try:
+        result = await asyncio.wait_for(run(mic), 5)
+        assert result.result is SpeechResultState.SUCCESS
+        assert result.text == "What's the time?"
+        turn = turns.take_voice_turn("conversation-1", result.text)
+        assert turn is not None and not turn.complete_conversation
+        assert b"".join([chunk async for chunk in turn.audio.async_chunks()])
+        assert reply_client.connect_count == 1
+        assert manager.should_continue_conversation("conversation-1")
+    finally:
+        await manager.async_close_all()
+
+
+@pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
 async def test_unrecognized_speech_closes_pipeline_silently(entity_class) -> None:
     """A provider turn with no usable content must not surface an STT error."""
     hass = FakeHass()
