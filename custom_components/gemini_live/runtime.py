@@ -27,6 +27,11 @@ _LOGGER = logging.getLogger(__name__)
 # racing ahead of playback.
 AUDIO_STREAM_MAX_BUFFER_BYTES = 6400
 
+# Closing a provider websocket can stall when the server never answers the
+# close handshake. A follow-up turn of the same conversation waits for that
+# close, so it must be bounded or the next question hangs indefinitely.
+SESSION_CLOSE_TIMEOUT = 3.0
+
 
 @dataclass(slots=True)
 class PipelineTurn:
@@ -55,6 +60,7 @@ class AudioStream:
         self,
         on_cancel: Callable[[], None] | None = None,
         max_buffer_bytes: int = AUDIO_STREAM_MAX_BUFFER_BYTES,
+        pause_before_consumer: bool = True,
     ) -> None:
         """Initialize an audio stream."""
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue()
@@ -62,6 +68,11 @@ class AudioStream:
         self._on_cancel = on_cancel
         self._max_buffer_bytes = max(1, max_buffer_bytes)
         self._buffered_bytes = 0
+        # With a streamed transcript, Home Assistant only starts the TTS stage
+        # (the consumer) once enough text has arrived. Pausing the producer
+        # before then would stop that text from ever arriving, so such streams
+        # apply backpressure only after the consumer has attached.
+        self._backpressure = pause_before_consumer
         self._can_produce = asyncio.Event()
         self._can_produce.set()
         self._interrupt_callbacks: set[Callable[[], None]] = set()
@@ -75,7 +86,11 @@ class AudioStream:
         """
         if not chunk or self._finished:
             return
-        while self._buffered_bytes >= self._max_buffer_bytes and not self._finished:
+        while (
+            self._backpressure
+            and self._buffered_bytes >= self._max_buffer_bytes
+            and not self._finished
+        ):
             self._can_produce.clear()
             await self._can_produce.wait()
         if self._finished:
@@ -134,6 +149,7 @@ class AudioStream:
     async def async_chunks(self) -> AsyncGenerator[bytes]:
         """Yield buffered and future PCM chunks."""
         consumed = False
+        self._backpressure = True
         try:
             while (chunk := await self._queue.get()) is not None:
                 self._buffered_bytes -= len(chunk)
@@ -502,7 +518,14 @@ class LiveSessionManager:
             return
         self._connections.pop(conversation_id, None)
         try:
-            await connection.context_manager.__aexit__(None, None, None)
+            async with asyncio.timeout(SESSION_CLOSE_TIMEOUT):
+                await connection.context_manager.__aexit__(None, None, None)
+        except TimeoutError:
+            _LOGGER.warning(
+                "Closing live-model session for conversation %s timed out; "
+                "abandoning it so the next turn can start",
+                conversation_id,
+            )
         except Exception:  # noqa: BLE001
             _LOGGER.debug(
                 "Error closing live-model session for conversation %s",

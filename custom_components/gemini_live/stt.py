@@ -103,6 +103,12 @@ OPTIMAL_STREAM_CHUNK_SIZE = 3200
 # so user speech is forwarded to the provider with less interruption latency.
 BARGE_IN_STREAM_CHUNK_SIZE = 1280
 
+# After the microphone closes, how long to wait for any sign that the provider
+# heard speech. A follow-up turn often records only silence (the user answered
+# too late); the provider then never replies, and without this bound the
+# device would sit waiting for the full response timeout.
+NO_SPEECH_TIMEOUT = 6.0
+
 _SEARCH_TOOL_HINTS = ("search", "web", "google")
 
 _SEARCH_TOOL_INSTRUCTION = (
@@ -759,7 +765,8 @@ class LiveModelSTT(SpeechToTextEntity):
             else OPTIMAL_STREAM_CHUNK_SIZE
         )
         response_audio_stream = AudioStream(
-            lambda: session_manager.cancel_conversation(self.hass, conversation_id)
+            lambda: session_manager.cancel_conversation(self.hass, conversation_id),
+            pause_before_consumer=not transcribe_output,
         )
         response_audio_resampler = PCM24kTo16kStreamResampler()
         response_text_stream = TextStream() if transcribe_output else None
@@ -1358,6 +1365,40 @@ class LiveModelSTT(SpeechToTextEntity):
                     # a silence timeout may still be processing its final
                     # audio. Wait for its first response just as we do without
                     # barge-in, rather than cancelling it immediately.
+                    if not (
+                        input_transcript_received.is_set()
+                        or gemini_replied.is_set()
+                    ):
+                        heard = asyncio.ensure_future(
+                            input_transcript_received.wait()
+                        )
+                        try:
+                            await asyncio.wait(
+                                [heard, receive_task],
+                                timeout=min(
+                                    NO_SPEECH_TIMEOUT, response_inactivity_timeout
+                                ),
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                        finally:
+                            heard.cancel()
+                        if not (
+                            input_transcript_received.is_set()
+                            or gemini_replied.is_set()
+                            or receive_task.done()
+                        ):
+                            _LOGGER.warning(
+                                "[turn=%s] no speech heard %.1fs after the microphone closed; ending turn",
+                                turn_id,
+                                NO_SPEECH_TIMEOUT,
+                            )
+                            receive_task.cancel()
+                            try:
+                                await receive_task
+                            except asyncio.CancelledError:
+                                pass
+                            session_manager.retire_session(conversation_id)
+                            return silent_success()
                     while not receive_task.done():
                         remaining = response_inactivity_timeout - (
                             time.monotonic() - last_response_activity
