@@ -136,3 +136,38 @@ async def test_transcript_streams_before_audio_is_consumed(entity_class) -> None
     finally:
         run.cancel()
         await manager.async_close_all()
+
+
+class SilentTurn(ScriptedSession):
+    """The provider heard no speech and never answers."""
+
+    def __init__(self) -> None:
+        super().__init__(support_barge_in=False)
+
+    async def receive(self):
+        await asyncio.Event().wait()
+        yield LiveEvent(turn_complete=True)
+
+
+@pytest.mark.parametrize("entity_class", ENTITY_CLASSES)
+async def test_silent_follow_up_ends_instead_of_waiting(
+    entity_class, monkeypatch
+) -> None:
+    """A follow-up that recorded only silence must end, not wait for the timeout."""
+    monkeypatch.setattr("gemini_live.stt.NO_SPEECH_TIMEOUT", 0.05, raising=False)
+    entity, manager, _turns = _make_entity(
+        FakeHass(),
+        {"api_key": "k", CONF_SUPPORT_BARGE_IN: False, CONF_RESPONSE_TIMEOUT: 120},
+        entity_class,
+    )
+    _bind_client(entity, ScriptedClient(SilentTurn()))
+    mic = MicStream()
+    mic.put(MIC_CHUNK)
+    mic.close()
+    try:
+        result = await asyncio.wait_for(_run(entity, mic), 2)
+        assert result.text and not manager.should_continue_conversation(
+            "conversation-1"
+        )
+    finally:
+        await manager.async_close_all()
