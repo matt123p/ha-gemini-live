@@ -405,7 +405,9 @@ async def test_sound_tool_plays_cue_without_model_speech(
 
         consumer = asyncio.create_task(consume())
         expected_audio = (
-            load_sound_pcm() if enabled else resample_24k_to_16k(AUDIO_A)
+            load_sound_pcm()
+            if enabled
+            else resample_24k_to_16k(AUDIO_A) if barge_in else AUDIO_A
         )
         assert await asyncio.wait_for(consumer, 5) == expected_audio
         if transcribe_output:
@@ -710,7 +712,7 @@ async def test_non_barge_in_keeps_forwarding_until_external_vad_closes_stream(
     turn = turn_store.take_voice_turn("conversation-1", result.text)
     assert turn is not None
     chunks = [chunk async for chunk in turn.audio.async_chunks()]
-    assert chunks == [resample_24k_to_16k(AUDIO_A)]
+    assert chunks == [AUDIO_A]
     assert "transcript" not in turn.assistant_text
     assert scripted_client.captured_config.support_barge_in is False
     assert scripted_client.captured_config.transcribe_output is False

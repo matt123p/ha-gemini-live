@@ -25,7 +25,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .compat import supports_tts_interruption
 from .const import (
     CONF_PROVIDER,
+    CONF_ENABLE_SOUND_RESPONSES,
     CONF_SUPPORT_BARGE_IN,
+    DEFAULT_ENABLE_SOUND_RESPONSES,
     DOMAIN,
     GEMINI_TURN_STORE_KEY,
     PROVIDER_GEMINI,
@@ -37,6 +39,9 @@ from .const import (
 )
 from .runtime import AudioStream
 from .utils import pcm_to_wav, streaming_wav_header
+
+# Gemini Live, GPT Realtime and Qwen Realtime produce 24 kHz, 16-bit mono PCM.
+NATIVE_AUDIO_SAMPLE_RATE = 24000
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +84,10 @@ class GeminiLiveTTS(TextToSpeechEntity):
         self._support_barge_in = bool(
             config.get(CONF_SUPPORT_BARGE_IN, False)
         ) and supports_tts_interruption()
+        # Must match the STT stream: see native_rate_output in stt.py.
+        self._native_rate_output = not self._support_barge_in and not bool(
+            config.get(CONF_ENABLE_SOUND_RESPONSES, DEFAULT_ENABLE_SOUND_RESPONSES)
+        )
         self._attr_name = self.integration_name
         self._attr_unique_id = f"{entry.entry_id}_tts"
 
@@ -189,7 +198,9 @@ class GeminiLiveTTS(TextToSpeechEntity):
                         on_audio_interrupt
                     )
                 try:
-                    yield streaming_wav_header()
+                    yield streaming_wav_header(
+                        NATIVE_AUDIO_SAMPLE_RATE if self._native_rate_output else 16000
+                    )
                     async with aclosing(audio.async_chunks()) as chunks:
                         async for chunk in chunks:
                             yield chunk
