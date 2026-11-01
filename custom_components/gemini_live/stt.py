@@ -759,7 +759,8 @@ class LiveModelSTT(SpeechToTextEntity):
             else OPTIMAL_STREAM_CHUNK_SIZE
         )
         response_audio_stream = AudioStream(
-            lambda: session_manager.cancel_conversation(self.hass, conversation_id)
+            lambda: session_manager.cancel_conversation(self.hass, conversation_id),
+            pause_before_consumer=not transcribe_output,
         )
         response_audio_resampler = PCM24kTo16kStreamResampler()
         response_text_stream = TextStream() if transcribe_output else None
