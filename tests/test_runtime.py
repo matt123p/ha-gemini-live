@@ -292,6 +292,27 @@ async def test_add_chunk_pauses_producer_when_buffer_is_full():
     await asyncio.wait_for(producer, 1)
 
 
+async def test_deferred_backpressure_resumes_when_consumer_attaches():
+    stream = AudioStream(max_buffer_bytes=4, pause_before_consumer=False)
+    await stream.add_chunk(b"aaaa")
+    await stream.add_chunk(b"bbbb")
+    chunks = stream.async_chunks()
+    assert await anext(chunks) == b"aaaa"
+
+    producer = asyncio.create_task(stream.add_chunk(b"cccc"))
+    try:
+        done, _ = await asyncio.wait([producer], timeout=0.01)
+        assert not done
+        assert await anext(chunks) == b"bbbb"
+        await asyncio.wait_for(producer, 1)
+        stream.finish()
+        assert [chunk async for chunk in chunks] == [b"cccc"]
+    finally:
+        producer.cancel()
+        await asyncio.gather(producer, return_exceptions=True)
+        await chunks.aclose()
+
+
 async def test_interrupt_unblocks_paused_producer_and_queues_replacement_audio():
     stream = AudioStream(max_buffer_bytes=4)
     await stream.add_chunk(b"old!")

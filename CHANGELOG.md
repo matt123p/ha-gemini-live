@@ -4,6 +4,13 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Bound provider connection cleanup to three seconds so a stalled WebSocket
+  close cannot block follow-up requests. Streamed transcripts can progress
+  before TTS begins consuming audio, preventing an audio-buffer deadlock.
+  Delayed responses still use the configured inactivity timeout (30 seconds
+  by default); early silence detection requires an explicit provider signal.
+  Refs #16.
+
 - Preserve the live model's native 24 kHz response audio when barge-in and
   sound responses are both disabled, avoiding the integration's 16 kHz
   downsampling. Barge-in and sound responses continue to use 16 kHz. Refs #17.

@@ -1002,7 +1002,7 @@ async def test_tools_detached_outside_home_assistant_are_attached_again():
     assert [(m, p) for m, p, *_ in http.calls] == [("patch", "/v1/convai/agents/agent_1")]
 
 
-@pytest.mark.parametrize("transcript", ["...", "", " â€¦ ", None])
+@pytest.mark.parametrize("transcript", ["...", "", " \u2026 ", None])
 async def test_a_silent_user_turn_reports_no_speech_and_drops_the_reengagement(transcript):
     silent = {"type": "user_transcript", "user_transcription_event": {"user_transcript": transcript}}
     user = {"type": "user_transcript", "user_transcription_event": {"user_transcript": "Licht an"}}
