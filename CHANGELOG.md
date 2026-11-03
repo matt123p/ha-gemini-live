@@ -9,11 +9,12 @@ All notable changes to Gemini Live for Home Assistant are documented here.
   before TTS begins consuming audio, preventing an audio-buffer deadlock.
   Delayed responses still use the configured inactivity timeout (30 seconds
   by default); early silence detection requires an explicit provider signal.
-  Refs #16.
+  Refs #16. Thanks to [@humani1](https://github.com/humani1).
 
 - Preserve the live model's native 24 kHz response audio when barge-in and
   sound responses are both disabled, avoiding the integration's 16 kHz
   downsampling. Barge-in and sound responses continue to use 16 kHz. Refs #17.
+  Thanks to [@humani1](https://github.com/humani1).
 
 - Added ElevenLabs Agents as a provider for voice and typed conversations,
   with ElevenLabs voices (including your own designed or cloned voices), a
@@ -23,6 +24,7 @@ All notable changes to Gemini Live for Home Assistant are documented here.
   when the entry is removed. Failed cleanup retains the tool IDs and reports
   a warning so cloud resources are not silently forgotten. Barge-in is not
   offered for this provider yet. Refs #14.
+  Thanks to [@seybsen](https://github.com/seybsen).
 - Added a provider-neutral `no_speech` live event. When a provider reports that
   the user stayed silent, the voice turn stops listening right away and ends as
   "no text recognized" instead of waiting for Core's 15-second VAD timeout.
