@@ -762,6 +762,10 @@ class LiveModelSTT(SpeechToTextEntity):
             lambda: session_manager.cancel_conversation(self.hass, conversation_id)
         )
         response_audio_resampler = PCM24kTo16kStreamResampler()
+        # Barge-in playback and the bundled 16 kHz sound cues need 16 kHz.
+        # Otherwise keep the model's native 24 kHz audio and let Core convert
+        # it for the consumer, which preserves the voice's high frequencies.
+        native_rate_output = not support_barge_in and not sound_responses_enabled
         response_text_stream = TextStream() if transcribe_output else None
 
         # The placeholder must carry the turn id: Home Assistant caches TTS
@@ -1112,7 +1116,9 @@ class LiveModelSTT(SpeechToTextEntity):
                             audio_response_chunk_count += 1
                             audio_response_bytes += len(response.audio)
                             await response_audio_stream.add_chunk(
-                                response_audio_resampler.process(response.audio)
+                                response.audio
+                                if native_rate_output
+                                else response_audio_resampler.process(response.audio)
                             )
                             first_audio.set()
 

@@ -94,7 +94,9 @@ async def test_core_interrupt_support_is_only_used_for_barge_in(
     response = await entity.async_stream_tts_audio(request)
     assert entity.supports_audio_interrupt is barge_in
 
-    assert await anext(response.data_gen) == streaming_wav_header()
+    assert await anext(response.data_gen) == streaming_wav_header(
+        16000 if barge_in else 24000
+    )
     audio.interrupt()
     assert on_audio_interrupt.call_count == int(barge_in)
     audio.finish()
@@ -160,6 +162,46 @@ async def test_buffered_and_silent_wav_support_interruptible_playback(
         assert wav.getsampwidth() == 2
         assert wav.getframerate() == 16000
         assert wav.readframes(wav.getnframes()) == pcm
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("barge_in", [False, True])
+async def test_placeholder_tts_waits_for_all_live_audio(barge_in: bool) -> None:
+    """Issue #15: finishing placeholder text must not finish live playback."""
+    cancelled = Mock()
+    audio = AudioStream(on_cancel=cancelled)
+    entity = _make_tts(barge_in=barge_in, audio=audio)
+    text_finished = asyncio.Event()
+
+    async def message() -> AsyncGenerator[str]:
+        yield "-- gemini live -- unique-turn"
+        text_finished.set()
+
+    response = await entity.async_stream_tts_audio(
+        SimpleNamespace(message_gen=message(), options={})
+    )
+    assert await anext(response.data_gen) == streaming_wav_header(
+        16000 if barge_in else 24000
+    )
+    await asyncio.wait_for(text_finished.wait(), 1)
+
+    # Text is already exhausted, but more provider audio may still arrive.
+    pending_chunk = asyncio.create_task(anext(response.data_gen))
+    try:
+        done, _ = await asyncio.wait([pending_chunk], timeout=0.05)
+        assert not done
+        await audio.add_chunk(b"first audio")
+        assert await asyncio.wait_for(pending_chunk, 1) == b"first audio"
+        await audio.add_chunk(b"last audio")
+        audio.finish()
+        assert await anext(response.data_gen) == b"last audio"
+        with pytest.raises(StopAsyncIteration):
+            await anext(response.data_gen)
+        cancelled.assert_not_called()
+    finally:
+        pending_chunk.cancel()
+        await asyncio.gather(pending_chunk, return_exceptions=True)
+        await response.data_gen.aclose()
 
 
 @pytest.mark.asyncio

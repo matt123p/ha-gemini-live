@@ -4,6 +4,10 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Preserve the live model's native 24 kHz response audio when barge-in and
+  sound responses are both disabled, avoiding the integration's 16 kHz
+  downsampling. Barge-in and sound responses continue to use 16 kHz. Refs #17.
+
 - Added QwenCloud Omni Realtime as a provider for voice and typed conversations,
   streaming audio, Home Assistant function calling, and barge-in. Supports
   Qwen3.8 Omni Flash and Qwen3.5 Omni Plus/Flash Realtime, including the documented
