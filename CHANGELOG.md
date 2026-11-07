@@ -4,6 +4,11 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+## 1.0.12
+
+- Documented setup for Gemini, OpenAI, QwenCloud, and ElevenLabs Agents,
+  including API-key links and matching Assist pipeline entities.
+
 - Fixed Gemini voice turns sometimes timing out without a reply when server
   speech detection misses a short command or speech over background music.
   With barge-in disabled, use Home Assistant's turn boundaries and explicit
