@@ -60,10 +60,64 @@ QwenCloud WebSocket details in `qwen.py`, and ElevenLabs Agents details in
 `elevenlabs.py`. Provider protocol details stay outside
 the shared STT, conversation, or session-manager code.
 
-## QwenCloud setup
+## Provider setup
 
-Choose **QwenCloud** when adding the integration, supply a
-[QwenCloud API key](https://www.qwencloud.com/), and select a realtime model.
+After [installing the integration](#installation), open **Settings > Devices &
+services > Add integration**, search for **Gemini Live**, and choose your provider.
+Use the instructions below to prepare its API key and select a model and voice.
+Then [create an Assist pipeline](#create-an-assist-pipeline) using all three
+matching entities from that provider's config entry. You can add separate entries
+and assistants for different providers.
+
+### Google Gemini setup
+
+1. Follow Home Assistant's [Gemini API-key instructions](https://www.home-assistant.io/integrations/google_generative_ai_conversation/#generate-an-api-key).
+2. Add **Gemini Live**, choose **Google Gemini**, and enter the key.
+3. Select a Live model and voice. **Gemini 3.8 Live** suits immediate voice
+   replies and smart-home commands; **Gemini 3.8 Live Extended Thinking** suits
+   more complex requests. Submit again if the form refreshes to show
+   model-specific options.
+4. Keep **Assist** selected under **LLM APIs** to enable Home Assistant control,
+   and submit the form.
+5. Select the matching **Gemini Live** conversation, STT, and TTS entities in
+   your Assist pipeline.
+
+Your account and region need access to the selected Live model. See Google's
+[available regions](https://ai.google.dev/gemini-api/docs/available-regions),
+[API pricing](https://ai.google.dev/gemini-api/docs/pricing), and
+[rate limits](https://ai.google.dev/gemini-api/docs/rate-limits).
+The [official Gemini integration](#recommended-set-up-both-integrations) can
+also be useful for checking the key and Home Assistant control first.
+
+### OpenAI (ChatGPT) setup
+
+1. Follow Home Assistant's [OpenAI API-key and billing instructions](https://www.home-assistant.io/integrations/openai_conversation/#prerequisites).
+2. Add **Gemini Live**, choose **OpenAI**, and enter the key.
+3. Select a Realtime model and voice from the offered choices. The integration
+   currently defaults to `gpt-realtime-2.1` and the `marin` voice.
+4. Keep **Assist** selected under **LLM APIs** to enable Home Assistant control,
+   and submit the form.
+5. Select the matching **GPT Realtime** conversation, STT, and TTS entities in
+   your Assist pipeline.
+
+This provider uses OpenAI's Realtime API. Setup requires an OpenAI API key and
+available API quota; this integration does not offer ChatGPT sign-in. Check your
+[API usage](https://platform.openai.com/usage) and
+[Realtime pricing](https://developers.openai.com/api/docs/pricing).
+
+### QwenCloud setup
+
+1. Sign in to the [QwenCloud console](https://home.qwencloud.com/) and follow
+   the [first API call guide](https://docs.qwencloud.com/developer-guides/getting-started/first-api-call)
+   to create an API key and prepare your account for API usage.
+2. Add **Gemini Live**, choose **QwenCloud**, and enter the key.
+3. Select a realtime model and voice. The defaults are
+   `qwen3.8-omni-flash-realtime` and `Tina`.
+4. Keep **Assist** selected under **LLM APIs** to enable Home Assistant control,
+   and submit the form.
+5. Select the matching **Qwen Realtime** conversation, STT, and TTS entities in
+   your Assist pipeline.
+
 The Qwen provider supports only models with documented function calling:
 
 - `qwen3.8-omni-flash-realtime` (default)
@@ -90,7 +144,7 @@ hosted MCP tools are not enabled. The Google-specific grounding, thinking, and
 affective-dialog settings are hidden for Qwen. As with other cloud providers,
 microphone audio, typed messages, tool schemas, and tool results are sent to Qwen.
 
-## ElevenLabs Agents setup
+### ElevenLabs Agents setup
 
 Choose **ElevenLabs Agents** to answer with an ElevenLabs voice, including
 voices you designed or cloned in your ElevenLabs account. Unlike the other
@@ -99,9 +153,12 @@ transcribes the user, asks the LLM you select, and synthesizes the reply,
 all inside one streaming session. That is why the **Live model** setting picks
 the agent's LLM rather than an audio model.
 
-1. Create an [ElevenLabs API key](https://elevenlabs.io/app/settings/api-keys)
-   with access to ElevenLabs Agents.
-2. Add the integration, choose **ElevenLabs Agents**, enter the key, and select
+1. Get an [ElevenLabs API key](https://elevenlabs.io/app/settings/api-keys).
+   See Home Assistant's [ElevenLabs account and API-key prerequisites](https://www.home-assistant.io/integrations/elevenlabs/#prerequisites).
+   For this integration, the key needs to list your voices and create,
+   read, update, and delete Agents and their client tools, as well as start
+   agent conversations. See [ElevenLabs API-key permissions](https://elevenlabs.io/docs/overview/administration/workspaces/api-keys).
+2. Add **Gemini Live**, choose **ElevenLabs Agents**, enter the key, and select
    an LLM. The offered models, led by the inexpensive default
    `gemini-3.1-flash-lite`, started speaking about two seconds after a
    tool-calling smart-home request in testing; any other LLM ID from the
@@ -109,7 +166,8 @@ the agent's LLM rather than an audio model.
    can be typed in.
 3. Submit once. The integration checks the key and shows your account's
    voices; pick one and submit again.
-4. Select the matching **ElevenLabs Agents** STT, conversation, and TTS entities
+4. Keep **Assist** selected under **LLM APIs** to enable Home Assistant control.
+   Select the matching **ElevenLabs Agents** STT, conversation, and TTS entities
    in your Assist pipeline.
 
 The integration manages these objects in your ElevenLabs account:
@@ -191,11 +249,9 @@ Before installing, you need:
 
 - A working Home Assistant installation with Assist pipeline support.
 - [HACS](https://www.hacs.xyz/) for the recommended installation method.
-- A Google Gemini API key created in
-  [Google AI Studio](https://aistudio.google.com/app/apikey).
-- Gemini Live API access in the region and account associated with the key; or
-  an OpenAI API key with Realtime API access from the
-  [OpenAI platform](https://platform.openai.com/api-keys).
+- An API key and available API quota for your chosen provider: Google Gemini,
+  OpenAI, QwenCloud, or ElevenLabs Agents. See [Provider setup](#provider-setup)
+  for account requirements and API-key instructions.
 - An Assist-capable voice device, browser, or companion app if you want to use
   voice input and playback.
 - Entities and scripts exposed to Assist if you want the model to control them.
@@ -259,8 +315,10 @@ upgrade to the latest version.
 1. In Home Assistant, open **Settings > Devices & services**.
 2. Select **Add integration**.
 3. Search for **Gemini Live**.
-4. Select Google Gemini or OpenAI as the provider.
-5. Enter that provider's API key and select a Realtime model and voice.
+4. Select Google Gemini, OpenAI, QwenCloud, or ElevenLabs
+   Agents as the provider. See [Provider setup](#provider-setup).
+5. Enter that provider's API key and select a model and voice. ElevenLabs lists
+   your account's voices after the first submission validates the key.
 6. Optionally enter a system instruction.
 7. Leave detailed logging disabled unless you are diagnosing a problem.
 8. Select **Submit**.
@@ -269,7 +327,7 @@ upgrade to the latest version.
 
 | Option | Description |
 | --- | --- |
-| Provider | Google Gemini Live or OpenAI GPT Realtime. Existing entries default to Gemini. |
+| Provider | Google Gemini Live, OpenAI GPT Realtime, QwenCloud, or ElevenLabs Agents. Existing entries default to Gemini. |
 | API key | API key for the selected provider, used for every live connection. |
 | Live model | Provider-specific Realtime model used for voice and typed conversations. |
 | Voice | Provider-specific built-in voice used for native audio responses. |
@@ -320,7 +378,8 @@ Use all three together in the same pipeline:
 
 1. Open **Settings > Voice assistants**.
 2. Create a new assistant, or edit a dedicated experimental assistant.
-3. Set **Conversation agent** to the configured **Gemini Live** or **GPT Realtime** entity.
+3. Set **Conversation agent** to the configured **Gemini Live**, **GPT Realtime**,
+   **Qwen Realtime**, or **ElevenLabs Agents** entity.
 4. Turn **off** Prefer handling commands locally.
 5. Select the matching provider entry for **Speech-to-text**.
 6. Select the matching provider entry for **Text-to-speech**.
