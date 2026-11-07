@@ -3,6 +3,9 @@
 import asyncio
 import sys
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, call
+
+from google.genai import types
 
 from gemini_live.gemini import (
     GeminiLiveClient,
@@ -87,13 +90,91 @@ async def _collect(session: GeminiLiveSession) -> list[LiveEvent]:
     return [event async for event in session.receive()]
 
 
-def test_gemini_config_without_barge_in_disables_activity_interruption():
+def test_gemini_config_without_barge_in_uses_manual_activity():
     config = _gemini_config(_make_config())
 
     assert config["realtime_input_config"] == {
+        "automatic_activity_detection": {"disabled": True},
         "activity_handling": "NO_INTERRUPTION",
         "turn_coverage": "TURN_INCLUDES_ONLY_ACTIVITY"
     }
+
+
+async def test_gemini_manual_audio_boundaries_across_reused_session():
+    sdk = SimpleNamespace(send_realtime_input=AsyncMock())
+    session = GeminiLiveSession(sdk)
+
+    await session.send_audio(b"first")
+    await session.send_audio(b"second")
+    await session.end_audio()
+    await session.end_audio()
+    await session.send_audio(b"next turn")
+    await session.end_audio()
+
+    assert sdk.send_realtime_input.await_args_list == [
+        call(activity_start=types.ActivityStart()),
+        call(audio=types.Blob(data=b"first", mime_type="audio/pcm;rate=16000")),
+        call(audio=types.Blob(data=b"second", mime_type="audio/pcm;rate=16000")),
+        call(activity_end=types.ActivityEnd()),
+        call(activity_start=types.ActivityStart()),
+        call(audio=types.Blob(data=b"next turn", mime_type="audio/pcm;rate=16000")),
+        call(activity_end=types.ActivityEnd()),
+    ]
+    assert session.last_outgoing == "realtime activity_end"
+
+
+async def test_gemini_empty_audio_does_not_open_manual_turn():
+    sdk = SimpleNamespace(send_realtime_input=AsyncMock())
+    session = GeminiLiveSession(sdk)
+
+    await session.end_audio()
+    await session.send_audio(b"")
+    await session.end_audio()
+
+    sdk.send_realtime_input.assert_not_awaited()
+
+
+async def test_gemini_manual_mode_supports_typed_then_voice_turns():
+    sdk = SimpleNamespace(
+        send_realtime_input=AsyncMock(), send_client_content=AsyncMock()
+    )
+    session = GeminiLiveSession(sdk)
+
+    await session.send_text("Turn on the lights")
+
+    sdk.send_client_content.assert_awaited_once_with(
+        turns={"role": "user", "parts": [{"text": "Turn on the lights"}]},
+        turn_complete=True,
+    )
+    sdk.send_realtime_input.assert_not_awaited()
+    assert session.last_outgoing == "client_content text (18 chars)"
+
+    await session.send_audio(b"voice")
+    await session.end_audio()
+    assert sdk.send_realtime_input.await_args_list[0] == call(
+        activity_start=types.ActivityStart()
+    )
+    assert sdk.send_realtime_input.await_args_list[-1] == call(
+        activity_end=types.ActivityEnd()
+    )
+
+
+async def test_gemini_barge_in_keeps_automatic_audio_and_text_activity():
+    sdk = SimpleNamespace(
+        send_realtime_input=AsyncMock(), send_client_content=AsyncMock()
+    )
+    session = GeminiLiveSession(sdk, support_barge_in=True)
+
+    await session.send_audio(b"voice")
+    await session.end_audio()
+    await session.send_text("hello")
+
+    assert sdk.send_realtime_input.await_args_list == [
+        call(audio=types.Blob(data=b"voice", mime_type="audio/pcm;rate=16000")),
+        call(audio_stream_end=True),
+        call(text="hello"),
+    ]
+    sdk.send_client_content.assert_not_awaited()
 
 
 def test_gemini_config_barge_in_enables_activity_interruption():

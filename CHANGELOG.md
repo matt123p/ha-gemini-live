@@ -4,6 +4,13 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
+- Fixed Gemini voice turns sometimes timing out without a reply when server
+  speech detection misses a short command or speech over background music.
+  With barge-in disabled, use Home Assistant's turn boundaries and explicit
+  Gemini activity signals. Typed Gemini turns use explicit client content
+  completion in this mode. Fixes #19.
+  Thanks to [@oerlich](https://github.com/oerlich).
+
 - Bound provider connection cleanup to three seconds so a stalled WebSocket
   close cannot block follow-up requests. Streamed transcripts can progress
   before TTS begins consuming audio, preventing an audio-buffer deadlock.

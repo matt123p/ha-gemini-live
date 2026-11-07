@@ -104,6 +104,7 @@ class GeminiLiveSession:
         self._session = session
         self._support_barge_in = support_barge_in
         self._extended_thinking = extended_thinking
+        self._audio_activity_started = False
         # Describes the most recent client message handed to the provider, so
         # a transport failure can be attributed to the message that likely
         # triggered it. The setup message counts as accepted once connect()
@@ -122,18 +123,40 @@ class GeminiLiveSession:
     async def send_audio(self, audio: bytes) -> None:
         from google.genai import types  # noqa: PLC0415
 
+        if not audio:
+            return
+        if not self._support_barge_in and not self._audio_activity_started:
+            await self._session.send_realtime_input(activity_start=types.ActivityStart())
+            self._audio_activity_started = True
+            self.last_outgoing = "realtime activity_start"
         await self._session.send_realtime_input(
             audio=types.Blob(data=audio, mime_type="audio/pcm;rate=16000")
         )
         self.last_outgoing = f"realtime audio chunk ({len(audio)} bytes)"
 
     async def end_audio(self) -> None:
-        await self._session.send_realtime_input(audio_stream_end=True)
-        self.last_outgoing = "realtime audio_stream_end"
+        if self._support_barge_in:
+            await self._session.send_realtime_input(audio_stream_end=True)
+            self.last_outgoing = "realtime audio_stream_end"
+        elif self._audio_activity_started:
+            from google.genai import types  # noqa: PLC0415
+
+            await self._session.send_realtime_input(activity_end=types.ActivityEnd())
+            self._audio_activity_started = False
+            self.last_outgoing = "realtime activity_end"
 
     async def send_text(self, text: str) -> None:
-        await self._session.send_realtime_input(text=text)
-        self.last_outgoing = f"realtime text ({len(text)} chars)"
+        if self._support_barge_in:
+            await self._session.send_realtime_input(text=text)
+            self.last_outgoing = f"realtime text ({len(text)} chars)"
+        else:
+            # Realtime text relies on automatic activity detection. Typed turns
+            # need an explicit completion when HA owns the activity boundaries.
+            await self._session.send_client_content(
+                turns={"role": "user", "parts": [{"text": text}]},
+                turn_complete=True,
+            )
+            self.last_outgoing = f"client_content text ({len(text)} chars)"
 
     async def send_tool_responses(
         self, responses: list[LiveToolResponse]
@@ -235,6 +258,9 @@ def _gemini_config(config: LiveConfig) -> dict[str, Any]:
         "system_instruction": {"parts": [{"text": config.system_instruction}]},
         "input_audio_transcription": {},
         "realtime_input_config": {
+            # HA already bounds the microphone stream in non-barge-in mode.
+            # Mark that activity explicitly rather than detecting speech twice.
+            "automatic_activity_detection": {"disabled": True},
             # Gemini defaults to interrupting an in-progress response when new
             # activity is detected. Disable that behaviour explicitly unless
             # the user has opted into barge-in; some satellites keep sending
