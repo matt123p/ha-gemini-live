@@ -59,8 +59,10 @@ from .const import (
 )
 from .stt import (
     END_CONVERSATION_TOOL_NAME,
+    KEEP_LISTENING_TOOL_NAME,
     _add_end_conversation_instruction,
     _add_end_conversation_tool,
+    follow_up_only_after_question,
     _add_search_tool_instruction,
     _clear_api_issues,
     _format_tools_for_live,
@@ -179,6 +181,7 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
         sound_responses_enabled = bool(
             config.get(CONF_ENABLE_SOUND_RESPONSES, DEFAULT_ENABLE_SOUND_RESPONSES)
         )
+        keep_listening = follow_up_only_after_question(config)
         if self.supports_search_grounding:
             encourage_web_search = bool(
                 config.get(
@@ -198,7 +201,9 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
         api_ids = config.get(CONF_LLM_HASS_API, [llm.LLM_API_ASSIST])
         if not api_ids:
             live_tools = _add_end_conversation_tool(
-                [], enable_sound_responses=sound_responses_enabled
+                [],
+                enable_sound_responses=sound_responses_enabled,
+                keep_listening=keep_listening,
             )
             system_instruction = _add_search_tool_instruction(
                 system_instruction,
@@ -207,7 +212,9 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                 native_search_grounding=self.supports_search_grounding,
             )
             system_instruction = _add_end_conversation_instruction(
-                system_instruction, enable_sound_responses=sound_responses_enabled
+                system_instruction,
+                enable_sound_responses=sound_responses_enabled,
+                keep_listening=keep_listening,
             )
             return None, live_tools, system_instruction
 
@@ -231,7 +238,9 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                 native_search_grounding=self.supports_search_grounding,
             )
             system_instruction = _add_end_conversation_instruction(
-                system_instruction, enable_sound_responses=sound_responses_enabled
+                system_instruction,
+                enable_sound_responses=sound_responses_enabled,
+                keep_listening=keep_listening,
             )
 
             live_tools = _add_end_conversation_tool(
@@ -241,6 +250,7 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                     encourage_web_search and not self.supports_search_grounding,
                 ),
                 enable_sound_responses=sound_responses_enabled,
+                keep_listening=keep_listening,
             )
 
             _LOGGER.debug(
@@ -255,7 +265,9 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                 exc,
             )
             live_tools = _add_end_conversation_tool(
-                [], enable_sound_responses=sound_responses_enabled
+                [],
+                enable_sound_responses=sound_responses_enabled,
+                keep_listening=keep_listening,
             )
             system_instruction = _add_search_tool_instruction(
                 system_instruction,
@@ -264,7 +276,9 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                 native_search_grounding=self.supports_search_grounding,
             )
             system_instruction = _add_end_conversation_instruction(
-                system_instruction, enable_sound_responses=sound_responses_enabled
+                system_instruction,
+                enable_sound_responses=sound_responses_enabled,
+                keep_listening=keep_listening,
             )
             return (
                 None,
@@ -374,6 +388,9 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
                                         "success": True,
                                         "conversation_ended": True,
                                     }
+                                elif tool_name == KEEP_LISTENING_TOOL_NAME:
+                                    session_manager.request_listen(conversation_id)
+                                    tool_result = {"success": True, "will_listen": True}
                                 elif tool_name == PLAY_SOUND_TOOL_NAME:
                                     if not sound_responses_enabled:
                                         tool_result = {
@@ -609,7 +626,12 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
             response=intent_response,
             conversation_id=conversation_id,
             continue_conversation=(
-                session_manager.should_continue_conversation(conversation_id)
+                session_manager.should_continue_conversation(
+                    conversation_id,
+                    only_after_question=follow_up_only_after_question(
+                        {**self.entry.data, **self.entry.options}
+                    ),
+                )
             ),
         )
 

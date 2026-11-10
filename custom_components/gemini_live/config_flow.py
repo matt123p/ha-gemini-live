@@ -21,6 +21,7 @@ from .const import (
     CONF_ELEVENLABS_AGENT_ID,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_ENABLE_SOUND_RESPONSES,
+    CONF_FOLLOW_UP_ONLY_AFTER_QUESTION,
     CONF_MODEL,
     CONF_PROVIDER,
     CONF_RESPONSE_TIMEOUT,
@@ -34,6 +35,7 @@ from .const import (
     DEFAULT_AFFECTIVE_DIALOG,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_ENABLE_SOUND_RESPONSES,
+    DEFAULT_FOLLOW_UP_ONLY_AFTER_QUESTION,
     DEFAULT_MODEL,
     DEFAULT_RESPONSE_TIMEOUT,
     DEFAULT_SEARCH_GROUNDING,
@@ -319,6 +321,15 @@ def _provider_schema(
                 CONF_ENABLE_SOUND_RESPONSES,
                 default=current.get(
                     CONF_ENABLE_SOUND_RESPONSES, DEFAULT_ENABLE_SOUND_RESPONSES
+                ),
+            )
+        ] = selector.BooleanSelector()
+        fields[
+            vol.Optional(
+                CONF_FOLLOW_UP_ONLY_AFTER_QUESTION,
+                default=current.get(
+                    CONF_FOLLOW_UP_ONLY_AFTER_QUESTION,
+                    DEFAULT_FOLLOW_UP_ONLY_AFTER_QUESTION,
                 ),
             )
         ] = selector.BooleanSelector()

@@ -335,6 +335,7 @@ upgrade to the latest version.
 | LLM APIs | Home Assistant APIs whose tools the model may call. Keep **Assist** selected for smart-home control; integrations such as AI Memory add their own choices, such as **Memory Management**. Multiple APIs can be enabled together. |
 | Detailed logging | Enables verbose logs from this custom integration. These logs can contain transcripts, model details, and tool-call information. |
 | Sound responses | Enables the optional `play_sound` tool for short beep responses instead of speech. Disabled by default. |
+| Listen for a follow-up only when Gemini needs more info | Keeps the microphone open after a reply only when the model asks the user a question (it calls a `keep_listening` tool before speaking). Otherwise the satellite returns to wake-word mode after each reply, so room noise or a TV can't start an unintended follow-up turn. Disabled by default, which keeps the current behaviour of listening after every reply. |
 | Transcribe Gemini / GPT | Streams the model's spoken-response transcript into Home Assistant while native audio is still arriving. Disabled by default for the lowest playback latency. |
 | Google Search grounding | Gemini only. Gives the Live model access to Google's built-in Search tool for current or verifiable web information. Optional and disabled by default. Search use may add Gemini API charges. |
 | Thinking level | Gemini 3.8 Live Extended Thinking only. Choose low, medium, or high background reasoning. Higher levels may improve complex answers while increasing latency and cost. |

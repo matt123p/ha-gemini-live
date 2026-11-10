@@ -307,6 +307,7 @@ class LiveSessionManager:
         self._connections: dict[str, _LiveConnection] = {}
         self._completed_conversations: set[str] = set()
         self._sessions_to_retire: set[str] = set()
+        self._listen_requested: set[str] = set()
         self._conversation_locks: WeakValueDictionary[str, asyncio.Lock] = (
             WeakValueDictionary()
         )
@@ -401,6 +402,7 @@ class LiveSessionManager:
     def reset_conversation(self, conversation_id: str) -> None:
         """Reset completed conversation status for a new user input."""
         self._completed_conversations.discard(conversation_id)
+        self._listen_requested.discard(conversation_id)
 
     async def async_prepare_for_new_turn(self, conversation_id: str) -> bool:
         """Finish pending cancellation and stop an overlapping provider turn."""
@@ -444,9 +446,23 @@ class LiveSessionManager:
 
         task.add_done_callback(cancellation_done)
 
-    def should_continue_conversation(self, conversation_id: str) -> bool:
-        """Return whether Home Assistant should keep listening."""
-        return conversation_id not in self._completed_conversations
+    def should_continue_conversation(
+        self, conversation_id: str, *, only_after_question: bool = False
+    ) -> bool:
+        """Return whether Home Assistant should keep listening.
+
+        With only_after_question, keep listening only when the model asked to
+        (keep_listening) during the current turn.
+        """
+        if conversation_id in self._completed_conversations:
+            return False
+        if only_after_question:
+            return conversation_id in self._listen_requested
+        return True
+
+    def request_listen(self, conversation_id: str) -> None:
+        """Keep listening after the current reply (the model asked a question)."""
+        self._listen_requested.add(conversation_id)
 
     def register_chat_session(
         self,
@@ -476,6 +492,7 @@ class LiveSessionManager:
                 await self._async_close(conversation_id, connection)
             self._completed_conversations.discard(conversation_id)
             self._sessions_to_retire.discard(conversation_id)
+            self._listen_requested.discard(conversation_id)
 
     def _lock_for(self, conversation_id: str) -> asyncio.Lock:
         """Return the serialization lock for a conversation."""

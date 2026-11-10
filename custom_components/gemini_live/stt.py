@@ -1,7 +1,7 @@
 """Shared speech-to-text platform for realtime model providers."""
 
 import asyncio
-from collections.abc import AsyncIterable, Callable
+from collections.abc import AsyncIterable, Callable, Mapping
 import datetime
 import logging
 import struct
@@ -43,6 +43,7 @@ from .const import (
     CONF_DETAILED_LOGGING,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_ENABLE_SOUND_RESPONSES,
+    CONF_FOLLOW_UP_ONLY_AFTER_QUESTION,
     CONF_MODEL,
     CONF_PROVIDER,
     CONF_RESPONSE_TIMEOUT,
@@ -61,6 +62,7 @@ from .const import (
     DEFAULT_TRANSCRIBE_GPT,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_ENABLE_SOUND_RESPONSES,
+    DEFAULT_FOLLOW_UP_ONLY_AFTER_QUESTION,
     DEFAULT_SYSTEM_INSTRUCTION,
     DEFAULT_SEARCH_GROUNDING,
     DOMAIN,
@@ -177,6 +179,7 @@ _QUOTA_USER_MESSAGE = (
 )
 
 END_CONVERSATION_TOOL_NAME = "end_conversation"
+KEEP_LISTENING_TOOL_NAME = "keep_listening"
 
 _END_CONVERSATION_INSTRUCTION = (
     f"You MUST call {END_CONVERSATION_TOOL_NAME} as the FIRST action when the "
@@ -187,6 +190,37 @@ _END_CONVERSATION_INSTRUCTION = (
     "'end the conversation', 'stop listening', 'goodbye', and 'bye'. Do not call it "
     "merely because you have finished answering the current request."
 )
+
+_KEEP_LISTENING_INSTRUCTION = (
+    "Home Assistant stops listening after each reply unless you ask it not to. "
+    f"If your reply asks the user a question they need to answer, call "
+    f"{KEEP_LISTENING_TOOL_NAME} FIRST, before speaking, so the microphone stays "
+    "open for their answer. Do not call it for replies that don't ask anything."
+)
+
+_KEEP_LISTENING_TOOL = LiveTool(
+    name=KEEP_LISTENING_TOOL_NAME,
+    description=(
+        "Call this BEFORE speaking a reply that asks the user a question, so Home "
+        "Assistant keeps the microphone open for their answer. Do not call it for "
+        "replies that don't ask anything."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
+)
+
+
+def follow_up_only_after_question(config: Mapping[str, Any]) -> bool:
+    """Return whether follow-up listening needs an explicit keep_listening call."""
+    return bool(
+        config.get(
+            CONF_FOLLOW_UP_ONLY_AFTER_QUESTION, DEFAULT_FOLLOW_UP_ONLY_AFTER_QUESTION
+        )
+    )
+
 
 _END_CONVERSATION_TOOL = LiveTool(
     name=END_CONVERSATION_TOOL_NAME,
@@ -374,20 +408,27 @@ def _add_end_conversation_tool(
     tools: list[LiveTool],
     *,
     enable_sound_responses: bool = False,
+    keep_listening: bool = False,
 ) -> list[LiveTool]:
     """Add integration-owned response and conversation tools."""
     return [
         *tools,
         _END_CONVERSATION_TOOL,
+        *([_KEEP_LISTENING_TOOL] if keep_listening else []),
         *([PLAY_SOUND_TOOL] if enable_sound_responses else []),
     ]
 
 
 def _add_end_conversation_instruction(
-    system_instruction: str, *, enable_sound_responses: bool = False
+    system_instruction: str,
+    *,
+    enable_sound_responses: bool = False,
+    keep_listening: bool = False,
 ) -> str:
     """Tell Gemini when to finish the Home Assistant conversation."""
     instruction = f"{system_instruction}\n\n{_END_CONVERSATION_INSTRUCTION}"
+    if keep_listening:
+        instruction += f"\n\n{_KEEP_LISTENING_INSTRUCTION}"
     if enable_sound_responses:
         instruction += f"\n\n{SOUND_INSTRUCTION}"
     return instruction
@@ -626,6 +667,7 @@ class LiveModelSTT(SpeechToTextEntity):
         sound_responses_enabled = bool(
             config.get(CONF_ENABLE_SOUND_RESPONSES, DEFAULT_ENABLE_SOUND_RESPONSES)
         )
+        only_after_question = follow_up_only_after_question(config)
         api_ids = config.get(CONF_LLM_HASS_API, [llm.LLM_API_ASSIST])
 
         if api_ids:
@@ -680,7 +722,9 @@ class LiveModelSTT(SpeechToTextEntity):
                 native_search_grounding=True,
             )
         system_instruction = _add_end_conversation_instruction(
-            system_instruction, enable_sound_responses=sound_responses_enabled
+            system_instruction,
+            enable_sound_responses=sound_responses_enabled,
+            keep_listening=only_after_question,
         )
 
         live_tools = _add_end_conversation_tool(
@@ -692,6 +736,7 @@ class LiveModelSTT(SpeechToTextEntity):
             if llm_api
             else [],
             enable_sound_responses=sound_responses_enabled,
+            keep_listening=only_after_question,
         )
         _LOGGER.debug(
             "Exposing %d tools to the live model: %s",
@@ -1027,6 +1072,9 @@ class LiveModelSTT(SpeechToTextEntity):
                                         "success": True,
                                         "conversation_ended": True,
                                     }
+                                elif tool_name == KEEP_LISTENING_TOOL_NAME:
+                                    session_manager.request_listen(conversation_id)
+                                    tool_result = {"success": True, "will_listen": True}
                                 elif tool_name == PLAY_SOUND_TOOL_NAME:
                                     if not sound_responses_enabled:
                                         tool_result = {
@@ -1490,7 +1538,7 @@ class LiveModelSTT(SpeechToTextEntity):
         assistant_text = response_text
 
         conversation_complete = not session_manager.should_continue_conversation(
-            conversation_id
+            conversation_id, only_after_question=only_after_question
         )
         if assistant_text or conversation_complete:
             turn_store.add_voice_turn(
