@@ -4,13 +4,15 @@ All notable changes to Gemini Live for Home Assistant are documented here.
 
 ## Unreleased
 
-- Added an optional **Listen for a follow-up only when Gemini needs more info** setting.
-  When enabled, Home Assistant keeps listening after a reply only if the model
-  calls the new `keep_listening` tool before asking the user a question;
-  otherwise the satellite returns to wake-word mode after every reply. This
-  avoids follow-up turns started by room noise or a TV, and the need to say
-  "that's all". Disabled by default, so existing setups keep listening after
-  every reply.
+- Added an optional **Listen for a follow-up only when the model needs more info**
+  setting for Gemini, OpenAI, QwenCloud, and ElevenLabs Agents. When enabled,
+  replies return the satellite to wake-word mode unless the model calls
+  `keep_listening` before the continuation decision is handed to Home Assistant.
+  This reduces unintended follow-up turns from room noise or a TV. Disabled by
+  default, preserving existing follow-up behaviour. Added voice-handoff and
+  typed-conversation regression tests and documented the tool-call timing limit.
+  Refs [PR #20](https://github.com/matt123p/ha-gemini-live/pull/20).
+  Thanks to [@oerlich](https://github.com/oerlich).
 
 ## 1.0.12
 

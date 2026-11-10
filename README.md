@@ -335,13 +335,24 @@ upgrade to the latest version.
 | LLM APIs | Home Assistant APIs whose tools the model may call. Keep **Assist** selected for smart-home control; integrations such as AI Memory add their own choices, such as **Memory Management**. Multiple APIs can be enabled together. |
 | Detailed logging | Enables verbose logs from this custom integration. These logs can contain transcripts, model details, and tool-call information. |
 | Sound responses | Enables the optional `play_sound` tool for short beep responses instead of speech. Disabled by default. |
-| Listen for a follow-up only when Gemini needs more info | Keeps the microphone open after a reply only when the model asks the user a question (it calls a `keep_listening` tool before speaking). Otherwise the satellite returns to wake-word mode after each reply, so room noise or a TV can't start an unintended follow-up turn. Disabled by default, which keeps the current behaviour of listening after every reply. |
+| Listen for a follow-up only when the model needs more info | Available for Gemini, OpenAI, QwenCloud, and ElevenLabs Agents. When enabled, the satellite returns to wake-word mode after each reply unless the model calls `keep_listening` to request an answer. Disabled by default, preserving the current follow-up behaviour. |
 | Transcribe Gemini / GPT | Streams the model's spoken-response transcript into Home Assistant while native audio is still arriving. Disabled by default for the lowest playback latency. |
 | Google Search grounding | Gemini only. Gives the Live model access to Google's built-in Search tool for current or verifiable web information. Optional and disabled by default. Search use may add Gemini API charges. |
 | Thinking level | Gemini 3.8 Live Extended Thinking only. Choose low, medium, or high background reasoning. Higher levels may improve complex answers while increasing latency and cost. |
 | Encourage web search | OpenAI only. Encourages the model to use an exposed search-like Assist tool. This is a prompt hint, not Gemini Search grounding. Disabled by default. |
 | Support barge-in | Experimental: keeps microphone audio streaming while the live model is speaking so the user can interrupt a response. Requires the Home Assistant Core interrupt path and a compatible full-duplex voice client or satellite. Disabled by default. |
 | Response inactivity timeout | Closes and discards a live provider session after 15–120 seconds without response activity. Defaults to 30 seconds. This does not change Home Assistant's external-VAD listening timeout. |
+
+With **Listen for a follow-up only when the model needs more info** enabled,
+"Turn off the lamp" normally ends the exchange, while "Which lamp?" keeps
+listening if the model requests it. This is a model-directed preference: the
+integration instructs the model to call `keep_listening` before speaking a
+question. If it omits the call, or calls after Home Assistant has received the
+continuation decision, the satellite returns to wake-word mode even if the
+reply asks a question. In particular, with response transcription disabled,
+that decision can be handed over as soon as response audio starts streaming.
+The setting reduces unwanted follow-up windows; it does not filter background
+noise while the microphone is open. PersonaPlex does not offer this setting.
 
 For most assistants, choose **Gemini 3.8 Live**: it is optimized for immediate,
 low-latency conversation and direct smart-home commands. Choose **Gemini 3.8
