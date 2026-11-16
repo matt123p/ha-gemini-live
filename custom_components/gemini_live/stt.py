@@ -43,6 +43,7 @@ from .const import (
     CONF_DETAILED_LOGGING,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_ENABLE_SOUND_RESPONSES,
+    CONF_END_OF_SPEECH_SENSITIVITY,
     CONF_FOLLOW_UP_ONLY_AFTER_QUESTION,
     CONF_MODEL,
     CONF_PROVIDER,
@@ -50,11 +51,13 @@ from .const import (
     CONF_SEARCH_GROUNDING,
     CONF_SYSTEM_INSTRUCTION,
     CONF_SUPPORT_BARGE_IN,
+    CONF_SILENCE_DURATION_MS,
     CONF_THINKING_LEVEL,
     CONF_TRANSCRIBE_GEMINI,
     CONF_TRANSCRIBE_GPT,
     CONF_VOICE,
     DEFAULT_AFFECTIVE_DIALOG,
+    DEFAULT_END_OF_SPEECH_SENSITIVITY,
     DEFAULT_RESPONSE_TIMEOUT,
     DEFAULT_SUPPORT_BARGE_IN,
     DEFAULT_THINKING_LEVEL,
@@ -65,6 +68,7 @@ from .const import (
     DEFAULT_FOLLOW_UP_ONLY_AFTER_QUESTION,
     DEFAULT_SYSTEM_INSTRUCTION,
     DEFAULT_SEARCH_GROUNDING,
+    DEFAULT_SILENCE_DURATION_MS,
     DOMAIN,
     GEMINI_LIVE_TTS_PLACEHOLDER,
     GEMINI_SESSION_MANAGER_KEY,
@@ -759,6 +763,19 @@ class LiveModelSTT(SpeechToTextEntity):
             tools=live_tools,
             transcribe_output=transcribe_output,
             support_barge_in=support_barge_in,
+            end_of_speech_sensitivity=str(
+                {**self.entry.data, **self.entry.options}.get(
+                    CONF_END_OF_SPEECH_SENSITIVITY,
+                    DEFAULT_END_OF_SPEECH_SENSITIVITY,
+                )
+            ),
+            silence_duration_ms=int(
+                {**self.entry.data, **self.entry.options}.get(
+                    CONF_SILENCE_DURATION_MS,
+                    DEFAULT_SILENCE_DURATION_MS,
+                )
+                or 0
+            ),
             affective_dialog=bool(
                 {**self.entry.data, **self.entry.options}.get(
                     CONF_AFFECTIVE_DIALOG, DEFAULT_AFFECTIVE_DIALOG

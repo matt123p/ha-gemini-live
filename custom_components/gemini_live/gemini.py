@@ -8,6 +8,7 @@ from contextlib import AbstractAsyncContextManager
 from typing import Any
 
 from .const import (
+    DEFAULT_END_OF_SPEECH_SENSITIVITY,
     DEFAULT_THINKING_LEVEL,
     EXTENDED_THINKING_MODEL,
     supports_affective_dialog,
@@ -274,9 +275,7 @@ def _gemini_config(config: LiveConfig) -> dict[str, Any]:
         # speech interrupts the current generation. Set explicitly so the
         # behaviour is deterministic and tied to the configuration option.
         result["realtime_input_config"] = {
-            "automatic_activity_detection": {
-                "disabled": False,
-            },
+            "automatic_activity_detection": _activity_detection(config),
             "activity_handling": "START_OF_ACTIVITY_INTERRUPTS",
             "turn_coverage": "TURN_INCLUDES_ONLY_ACTIVITY",
         }
@@ -309,6 +308,25 @@ def _gemini_config(config: LiveConfig) -> dict[str, Any]:
             for tool in config.tools
         )
     return result
+
+
+def _activity_detection(config: LiveConfig) -> dict[str, Any]:
+    """Automatic activity detection settings for an AAD-enabled session.
+
+    Gemini decides where the user's speech ends. Its defaults suit short
+    commands; a pause in a dictated request ends the turn early and the reply
+    answers only the first part. ``end_of_speech_sensitivity`` lower holds the
+    turn open longer, and ``silence_duration_ms`` sets the silence that closes
+    it. Both are passed only when set, so an untouched config is byte-identical
+    to the previous behaviour.
+    """
+    detection: dict[str, Any] = {"disabled": False}
+    sensitivity = getattr(config, "end_of_speech_sensitivity", None)
+    if sensitivity and sensitivity != DEFAULT_END_OF_SPEECH_SENSITIVITY:
+        detection["end_of_speech_sensitivity"] = f"END_SENSITIVITY_{sensitivity.upper()}"
+    if silence := getattr(config, "silence_duration_ms", 0):
+        detection["silence_duration_ms"] = int(silence)
+    return detection
 
 
 def _gemini_tool(

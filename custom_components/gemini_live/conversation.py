@@ -22,15 +22,18 @@ from .const import (
     CONF_AFFECTIVE_DIALOG,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_ENABLE_SOUND_RESPONSES,
+    CONF_END_OF_SPEECH_SENSITIVITY,
     CONF_MODEL,
     CONF_PROVIDER,
     CONF_SEARCH_GROUNDING,
     CONF_SYSTEM_INSTRUCTION,
+    CONF_SILENCE_DURATION_MS,
     CONF_THINKING_LEVEL,
     CONF_TRANSCRIBE_GEMINI,
     CONF_TRANSCRIBE_GPT,
     CONF_VOICE,
     DEFAULT_AFFECTIVE_DIALOG,
+    DEFAULT_END_OF_SPEECH_SENSITIVITY,
     DEFAULT_SYSTEM_INSTRUCTION,
     DEFAULT_THINKING_LEVEL,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
@@ -38,6 +41,7 @@ from .const import (
     DEFAULT_TRANSCRIBE_GEMINI,
     DEFAULT_TRANSCRIBE_GPT,
     DEFAULT_SEARCH_GROUNDING,
+    DEFAULT_SILENCE_DURATION_MS,
     DOMAIN,
     GEMINI_LIVE_TTS_PLACEHOLDER,
     GEMINI_SESSION_MANAGER_KEY,
@@ -317,6 +321,16 @@ class LiveModelConversationAgent(conversation.ConversationEntity):
             system_instruction=system_instruction,
             tools=live_tools,
             transcribe_output=True,
+            end_of_speech_sensitivity=str(
+                config.get(
+                    CONF_END_OF_SPEECH_SENSITIVITY,
+                    DEFAULT_END_OF_SPEECH_SENSITIVITY,
+                )
+            ),
+            silence_duration_ms=int(
+                config.get(CONF_SILENCE_DURATION_MS, DEFAULT_SILENCE_DURATION_MS)
+                or 0
+            ),
             affective_dialog=bool(
                 config.get(CONF_AFFECTIVE_DIALOG, DEFAULT_AFFECTIVE_DIALOG)
             ),

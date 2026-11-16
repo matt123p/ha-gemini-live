@@ -18,6 +18,10 @@ CONF_THINKING_LEVEL = "thinking_level"
 CONF_SUPPORT_BARGE_IN = "support_barge_in"
 CONF_AFFECTIVE_DIALOG = "affective_dialog"
 CONF_RESPONSE_TIMEOUT = "response_timeout"
+# Automatic activity detection tuning. Only used when activity detection is
+# enabled (barge-in); it shapes where Gemini decides the user stopped speaking.
+CONF_END_OF_SPEECH_SENSITIVITY = "end_of_speech_sensitivity"
+CONF_SILENCE_DURATION_MS = "silence_duration_ms"
 
 DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
 DEFAULT_VOICE = "Puck"
@@ -33,6 +37,11 @@ DEFAULT_AFFECTIVE_DIALOG = False
 DEFAULT_RESPONSE_TIMEOUT = 30
 MIN_RESPONSE_TIMEOUT = 15
 MAX_RESPONSE_TIMEOUT = 120
+DEFAULT_END_OF_SPEECH_SENSITIVITY = "default"
+END_OF_SPEECH_SENSITIVITIES = ["default", "low", "medium", "high"]
+DEFAULT_SILENCE_DURATION_MS = 0
+MIN_SILENCE_DURATION_MS = 0
+MAX_SILENCE_DURATION_MS = 5000
 PROVIDER_GEMINI = "gemini"
 PROVIDER_OPENAI = "openai"
 PROVIDER_PERSONAPLEX = "personaplex"

@@ -122,7 +122,9 @@
           "affective_dialog": "Affective dialog",
           "llm_hass_api": "LLM APIs",
           "transcribe_qwen": "Transcribe Qwen",
-          "transcribe_elevenlabs": "Transcribe ElevenLabs"
+          "transcribe_elevenlabs": "Transcribe ElevenLabs",
+          "end_of_speech_sensitivity": "End of speech sensitivity",
+          "silence_duration_ms": "Silence before the turn ends"
         },
         "data_description": {
           "model": "After a model change, the form may refresh once to show only settings supported by that model. For ElevenLabs Agents, this is the LLM the agent uses; any model ID from the ElevenLabs Agents documentation can be entered.",
@@ -135,7 +137,9 @@
           "affective_dialog": "Let the model pick up on the tone and emotion in your voice and adapt its own speaking style to match, so replies sound more empathetic and natural. Only available on Gemini 2.5 Flash Native Audio Preview (12-2025).",
           "llm_hass_api": "Choose the Home Assistant LLM APIs whose tools the live model may use. Select Assist for smart-home control and Memory Management for long-term memory.",
           "transcribe_qwen": "Stream the spoken-response transcript from Qwen into Home Assistant.",
-          "transcribe_elevenlabs": "Stream the ElevenLabs agent's response text into Home Assistant. Disabling this gives the lowest reply-audio latency."
+          "transcribe_elevenlabs": "Stream the ElevenLabs agent's response text into Home Assistant. Disabling this gives the lowest reply-audio latency.",
+          "end_of_speech_sensitivity": "How sure Gemini must be that you have stopped speaking before it ends your turn. Choose low to keep the turn open through pauses when you dictate a long request; the default keeps Gemini's own setting.",
+          "silence_duration_ms": "Milliseconds of silence that end your turn once activity detection decides you stopped. 0 keeps Gemini's default. Longer values suit dictation; shorter values feel snappier for short commands."
         }
       }
     },

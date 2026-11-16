@@ -21,11 +21,13 @@ from .const import (
     CONF_ELEVENLABS_AGENT_ID,
     CONF_ENCOURAGE_WEB_SEARCH,
     CONF_ENABLE_SOUND_RESPONSES,
+    CONF_END_OF_SPEECH_SENSITIVITY,
     CONF_FOLLOW_UP_ONLY_AFTER_QUESTION,
     CONF_MODEL,
     CONF_PROVIDER,
     CONF_RESPONSE_TIMEOUT,
     CONF_SEARCH_GROUNDING,
+    CONF_SILENCE_DURATION_MS,
     CONF_SUPPORT_BARGE_IN,
     CONF_SYSTEM_INSTRUCTION,
     CONF_THINKING_LEVEL,
@@ -35,10 +37,12 @@ from .const import (
     DEFAULT_AFFECTIVE_DIALOG,
     DEFAULT_ENCOURAGE_WEB_SEARCH,
     DEFAULT_ENABLE_SOUND_RESPONSES,
+    DEFAULT_END_OF_SPEECH_SENSITIVITY,
     DEFAULT_FOLLOW_UP_ONLY_AFTER_QUESTION,
     DEFAULT_MODEL,
     DEFAULT_RESPONSE_TIMEOUT,
     DEFAULT_SEARCH_GROUNDING,
+    DEFAULT_SILENCE_DURATION_MS,
     DEFAULT_SUPPORT_BARGE_IN,
     DEFAULT_THINKING_LEVEL,
     DEFAULT_TRANSCRIBE_GEMINI,
@@ -55,6 +59,9 @@ from .const import (
     PERSONAPLEX_DEFAULT_VOICE,
     MAX_RESPONSE_TIMEOUT,
     MIN_RESPONSE_TIMEOUT,
+    END_OF_SPEECH_SENSITIVITIES,
+    MAX_SILENCE_DURATION_MS,
+    MIN_SILENCE_DURATION_MS,
     PROVIDER_QWEN,
     PROVIDER_ELEVENLABS,
     CONF_TRANSCRIBE_ELEVENLABS,
@@ -388,6 +395,34 @@ def _provider_schema(
                 ),
             )
         ] = selector.BooleanSelector()
+        # Activity-detection tuning. Both are no-ops unless set, so an
+        # untouched form keeps Gemini's defaults.
+        fields[
+            vol.Optional(
+                CONF_END_OF_SPEECH_SENSITIVITY,
+                default=current.get(
+                    CONF_END_OF_SPEECH_SENSITIVITY,
+                    DEFAULT_END_OF_SPEECH_SENSITIVITY,
+                ),
+            )
+        ] = _model_selector(END_OF_SPEECH_SENSITIVITIES)
+        fields[
+            vol.Optional(
+                CONF_SILENCE_DURATION_MS,
+                default=current.get(
+                    CONF_SILENCE_DURATION_MS,
+                    DEFAULT_SILENCE_DURATION_MS,
+                ),
+            )
+        ] = selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=MIN_SILENCE_DURATION_MS,
+                max=MAX_SILENCE_DURATION_MS,
+                step=100,
+                unit_of_measurement="ms",
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        )
     # The affective-dialog switch is Gemini-specific and only rendered for
     # models that support it; Home Assistant config forms cannot render a
     # disabled field, so it is hidden instead.
@@ -428,6 +463,8 @@ def _strip_unsupported_settings(user_input: dict[str, Any]) -> dict[str, Any]:
         user_input.pop(CONF_THINKING_LEVEL, None)
     if not supports_tts_interruption():
         user_input.pop(CONF_SUPPORT_BARGE_IN, None)
+        user_input.pop(CONF_END_OF_SPEECH_SENSITIVITY, None)
+        user_input.pop(CONF_SILENCE_DURATION_MS, None)
     if user_input.get(CONF_MODEL) in QWEN_AVAILABLE_MODELS:
         user_input.pop(CONF_SEARCH_GROUNDING, None)
         user_input.pop(CONF_ENCOURAGE_WEB_SEARCH, None)

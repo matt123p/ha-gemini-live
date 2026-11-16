@@ -26,6 +26,9 @@ class LiveConfig:
     tools: list[LiveTool] = field(default_factory=list)
     transcribe_output: bool = True
     support_barge_in: bool = False
+    # Activity-detection tuning; only meaningful when activity detection runs.
+    end_of_speech_sensitivity: str = "default"
+    silence_duration_ms: int = 0
     affective_dialog: bool = False
     search_grounding: bool = False
     thinking_level: str | None = None

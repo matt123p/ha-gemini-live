@@ -195,6 +195,43 @@ def test_gemini_config_barge_in_does_not_change_other_settings():
             assert legacy[key] == barge_in[key]
 
 
+def test_activity_detection_defaults_are_unchanged():
+    """An untouched config sends exactly what it sent before this setting existed."""
+    detection = _gemini_config(_make_config(support_barge_in=True))[
+        "realtime_input_config"
+    ]["automatic_activity_detection"]
+
+    assert detection == {"disabled": False}
+
+
+def test_activity_detection_applies_tuning():
+    detection = _gemini_config(
+        _make_config(
+            support_barge_in=True,
+            end_of_speech_sensitivity="low",
+            silence_duration_ms=1500,
+        )
+    )["realtime_input_config"]["automatic_activity_detection"]
+
+    assert detection == {
+        "disabled": False,
+        "end_of_speech_sensitivity": "END_SENSITIVITY_LOW",
+        "silence_duration_ms": 1500,
+    }
+
+
+def test_activity_detection_tuning_ignored_without_barge_in():
+    """Activity detection is off without barge-in, so tuning must not be sent."""
+    realtime_input = _gemini_config(
+        _make_config(
+            end_of_speech_sensitivity="low",
+            silence_duration_ms=1500,
+        )
+    )["realtime_input_config"]
+
+    assert realtime_input["automatic_activity_detection"] == {"disabled": True}
+
+
 def test_gemini_config_legacy_tools_have_no_behaviour():
     config = _gemini_config(
         _make_config(
